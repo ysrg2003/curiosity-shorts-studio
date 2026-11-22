@@ -143,7 +143,7 @@ def request(prompt,system,schema=None,json_mode=False,effort='none'):
     return output,{'backend':'openrouter-free','model':MODEL,'usage':usage,'paid_fallback_allowed':False,'response_shape':shape,'complete_json_extracted':extracted,'reasoning_effort':effort}
 
 
-def free_quota_status(minimum_requests=28):
+def free_quota_status(minimum_requests=31):
     """Read only the documented current-key daily counter; never retain labels or account details."""
     key=os.environ.get('OPENROUTER_API_KEY','').strip()
     if not key:raise ValueError('Missing OPENROUTER_API_KEY Actions secret. No request sent.')
@@ -158,7 +158,7 @@ def free_quota_status(minimum_requests=28):
         remaining=counter.get('remaining')
         if type(remaining) is int:
             result['daily_counter']='at_limit' if remaining<=0 else 'has_remaining'
-            # Count1 worst case:2proposals+3relevance screens+3drafts+3reviews+5visuals*3code attempts=26calls, plus2connection checks.
+            # Count1 worst case:2proposals+3relevance screens*2contract attempts+3drafts+3reviews+5visuals*3code attempts=29calls, plus2connection checks.
             result['request_budget']='sufficient_for_bounded_attempt' if remaining>=minimum_requests else 'below_conservative_reserve'
         return result
     except Exception:
