@@ -91,7 +91,8 @@ jobs:
             if curl --fail --silent http://127.0.0.1:11434/api/tags; then break; fi
             sleep 1
           done
-          /tmp/ollama/bin/ollama pull qwen3:4b
+          /tmp/ollama/bin/ollama pull qwen3:4b-instruct
+          python -m curiosity.local_ai
       - name: Trusted topic, research and script inference; credential-free media children
         env:
           OPENROUTER_API_KEY: ${{ inputs.mode != 'starter' && inputs.backend == 'openrouter-free' && secrets.OPENROUTER_API_KEY || '' }}
