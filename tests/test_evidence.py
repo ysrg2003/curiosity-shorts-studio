@@ -52,7 +52,7 @@ def test_relevance_requires_true_boolean_and_observation_mechanism_two_sources(m
     def ask(model,system,prompt,schema,endpoint,seed,effort):
         assert effort=='low'
         ids=list(prompt['sentence_catalog']);first=next(k for k in ids if k.startswith('S0'));second=next(k for k in ids if k.startswith('S1'))
-        return {'topic_assessment':{'suitable':True,'reason':'Synthetic suitability fixture'},'source_assessments':[{'source_index':i,'usable':True,'reason':'Synthetic fixture'} for i in range(2)],'answer':'Synthetic observations remain fictional in this bounded unit test.','answer_quote_ids':[first,second],'supported':True if mode[0]!='string_false' else 'false','observable_quote_ids':[first],'mechanism_quote_ids':[second if mode[0]!='one_source' else first],'issues':[]},{'usage':{'cost':'0'}}
+        return {'topic_assessment':{'suitable':True,'reason':'fits_short_visual_science'},'source_assessments':[{'source_index':i,'usable':True,'reason':'current_observation_or_mechanism'} for i in range(2)],'answer':'Synthetic observations remain fictional in this bounded unit test.','answer_quote_ids':[first,second],'supported':True if mode[0]!='string_false' else 'false','observable_quote_ids':[first],'mechanism_quote_ids':[second if mode[0]!='one_source' else first],'issues':[]},{'usage':{'cost':'0'}}
     monkeypatch.setattr(storyboard,'ask',ask)
     assert evidence.screen('Synthetic observation?',sources(),'synthetic')[0]
     mode[0]='one_source';assert not evidence.screen('Synthetic observation?',sources(),'synthetic')[0]
@@ -125,8 +125,8 @@ def test_source_pack_keeps_document_origin_separate_within_same_budget():
 def test_relevance_rejects_inconsistent_source_assessments_and_selected_evidence(monkeypatch,mode):
     def ask(model,system,prompt,schema,*args,**kwargs):
         assert schema['properties']['source_assessments']['minItems']==2
-        assessments=[{'source_index':0,'usable':True,'reason':'Synthetic fixture'},{'source_index':1,'usable':True,'reason':'Synthetic fixture'}]
-        result={'topic_assessment':{'suitable':True,'reason':'Synthetic suitability fixture'},'source_assessments':assessments,'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]}
+        assessments=[{'source_index':0,'usable':True,'reason':'current_observation_or_mechanism'},{'source_index':1,'usable':True,'reason':'current_observation_or_mechanism'}]
+        result={'topic_assessment':{'suitable':True,'reason':'fits_short_visual_science'},'source_assessments':assessments,'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]}
         if mode=='flagged_source':assessments[1]['usable']=False
         if mode=='duplicate_assessment':assessments[1]['source_index']=0
         if mode=='missing_assessment':assessments.pop()
@@ -145,7 +145,7 @@ def test_valid_source_subset_excludes_unusable_pool_records_before_drafting(monk
     monkeypatch.setattr(autonomy,'questions',lambda *args:([{'question':'Synthetic observation?','search_terms':'synthetic mechanism'}],{}))
     monkeypatch.setattr(autonomy,'research',lambda *args:(pool,{}))
     def ask(model,system,prompt,schema,*args,**kwargs):
-        return {'topic_assessment':{'suitable':True,'reason':'Synthetic suitability fixture'},'source_assessments':[{'source_index':i,'usable':i<2,'reason':'Synthetic fixture'} for i in range(3)],'answer':'Synthetic observations remain fictional in this bounded unit test.','answer_quote_ids':['S0Q0','S1Q0'],'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]},{}
+        return {'topic_assessment':{'suitable':True,'reason':'fits_short_visual_science'},'source_assessments':[{'source_index':i,'usable':i<2,'reason':'current_observation_or_mechanism' if i<2 else 'historical_or_obsolete'} for i in range(3)],'answer':'Synthetic observations remain fictional in this bounded unit test.','answer_quote_ids':['S0Q0','S1Q0'],'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]},{}
     monkeypatch.setattr(storyboard,'ask',ask)
     selected,approved,audit=autonomy.select_and_research('synthetic',[])
     assert selected=='Synthetic observation?' and approved==pool[:2] and len(pool)==3
