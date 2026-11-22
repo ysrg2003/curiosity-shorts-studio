@@ -35,6 +35,8 @@ def source_pack(topic,sources,budget=9500):
             best=window(each-len(opening))
         excerpt=text[best[3]:best[4]].strip() if best else ''
         entry={'url':source['url'],'title':source.get('title',''),'text':excerpt}
+        for key in ('source_scope','publication_year','retrieval_url','pmid'):
+            if key in source:entry[key]=source[key]
         if opening:entry['document_opening']=opening
         packed.append(entry)
     return packed
