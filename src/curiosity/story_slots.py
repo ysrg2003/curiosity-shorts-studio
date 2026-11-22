@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen
 # Positive classes avoid regex shorthand, lookarounds and JSON quote/escape ambiguity.
 # Single spaces keep grammar and Python split() word counting in agreement.
 WORD = r"""[A-Za-z0-9][-A-Za-z0-9',.!?:;()%/]*"""
+WORD_BOUNDS = {'PIP': (8, 12), 'RAY': (20, 24)}
 LAYOUT = (
     ('pip_open', 'PIP', 'dialogue'),
     ('ray_setup', 'RAY', 'dialogue'),
@@ -25,7 +26,7 @@ LAYOUT = (
 
 
 def word_pattern(speaker):
-    low, high = (8, 12) if speaker == 'PIP' else (20, 24)
+    low, high = WORD_BOUNDS[speaker]
     return '^' + WORD + '( ' + WORD + '){' + str(low - 1) + ',' + str(high - 1) + '}$'
 
 
@@ -63,6 +64,32 @@ def schema(entries):
     })
 
 
+def preflight(entries):
+    """Reject an inconsistent generation contract before spending a draft call."""
+    from jsonschema import Draft202012Validator
+    request_schema = schema(entries)
+    Draft202012Validator.check_schema(request_schema)
+    speakers = [speaker for _, speaker, _ in LAYOUT]
+    if len(LAYOUT) != 13 or len({name for name, _, _ in LAYOUT}) != 13:
+        raise ValueError('Generation specification needs 13 unique dialogue slots')
+    if speakers != ['PIP', 'RAY'] * 6 + ['PIP']:
+        raise ValueError('Generation specification must alternate with Pip first and last')
+    if sum(beat == 'explain' for _, _, beat in LAYOUT) != 3:
+        raise ValueError('Generation specification needs three explanation scenes')
+    if any(speaker != 'RAY' and beat == 'explain' for _, speaker, beat in LAYOUT):
+        raise ValueError('Generation specification cannot turn Pip dialogue into explanations')
+    bounds = [sum(WORD_BOUNDS[speaker][i] for speaker in speakers) for i in (0, 1)]
+    if not 155 <= bounds[0] <= bounds[1] <= 255:
+        raise ValueError('Generation specification conflicts with the story word-count gate')
+    groups = {entry['source_index'] for entry in entries.values()}
+    if len(groups) < 2:
+        raise ValueError('Generation specification needs evidence from two source records')
+    return {'accepted': True, 'stage': 'generation_specification', 'dialogue_slots': 13,
+            'spoken_word_bounds': bounds, 'explanation_scenes': 3,
+            'catalogued_source_records': len(groups), 'post_generation_narration_repair': False,
+            'not_a_factual_accuracy_guarantee': True}
+
+
 def materialize(raw, entries):
     """Assign layout only. Never pad, trim, paraphrase or repair generated content."""
     from jsonschema import Draft202012Validator
@@ -87,7 +114,7 @@ def materialize(raw, entries):
 
 def prompt_layout():
     return [{'slot': name, 'speaker': speaker, 'beat': beat,
-             'spoken_words': '8 to 12' if speaker == 'PIP' else '20 to 24'}
+             'spoken_words': f'{WORD_BOUNDS[speaker][0]} to {WORD_BOUNDS[speaker][1]}'}
             for name, speaker, beat in LAYOUT]
 
 
@@ -107,7 +134,7 @@ def probe(endpoint='http://127.0.0.1:11434'):
         raise ValueError('Story constraint probe requires the pinned instruct manifest')
     constraints = object_schema({speaker.lower(): {'type': 'string', 'pattern': word_pattern(speaker)}
                                  for speaker in ('PIP', 'RAY')})
-    payload = {'model': MODEL, 'prompt': 'A synthetic formatting test only. Return pip and ray strings of unrelated ordinary English words. pip needs 8 to 12 words; ray needs 20 to 24. Single spaces, letters and ordinary punctuation only. No facts or story.',
+    payload = {'model': MODEL, 'prompt': 'A synthetic formatting test only. Return JSON with pip set to test and ray set to test. Each string must contain exactly one word. Do not add a topic, story or scientific facts.',
                'format': constraints, 'stream': False, 'think': False,
                'options': {'num_ctx': 2048, 'num_predict': 160, 'temperature': 0, 'seed': 1, 'num_thread': 4}}
     request = Request(endpoint.rstrip('/') + '/api/generate', data=json.dumps(payload).encode(),
@@ -125,6 +152,7 @@ def probe(endpoint='http://127.0.0.1:11434'):
     accepted = bool(valid and isinstance(thinking, str) and not thinking
                     and result.get('done') is True and result.get('done_reason') == 'stop')
     return {'accepted': accepted, 'manifest_verified': True, 'episode_content_supplied': False,
+            'conflicting_one_word_prompt': True,
             'word_counts': {key: len(obj[key].split()) for key in ('pip', 'ray')
                             if shape and isinstance(obj[key], str)},
             'prompt_tokens': result.get('prompt_eval_count'), 'output_tokens': result.get('eval_count'),
