@@ -19,7 +19,7 @@ def fixture(low=True):
            'tags': [f'fixture{i}' for i in range(8)], 'uncertainties': [], 'slots': {}}
     for i, (name, speaker, beat) in enumerate(slots.LAYOUT):
         count = (8 if low else 12) if speaker == 'PIP' else (20 if low else 24)
-        item = {'text': ' '.join(['may'] + ['word'] * (count - 1)),
+        item = {'text': ' '.join(['may'] + ['word'] * (count - 1)) + '.',
                 'expression': 'curious', 'visual_title': 'Synthetic fixture'}
         if speaker == 'RAY':
             item['evidence'] = [{'quote_id': ids[(i // 2) % len(ids)]}]
@@ -96,7 +96,8 @@ def test_materialized_layout_does_not_replace_two_source_or_length_checks():
 
 
 def test_factual_rejection_still_stops_and_keeps_unreviewed_diagnostics(monkeypatch, tmp_path):
-    from curiosity import planner, storyboard
+    from curiosity import planner, storyboard, entailment
+    monkeypatch.setattr(entailment, 'story', lambda obj: {'accepted': True, 'pairs': [], 'synthetic': True})
     raw, _ = fixture()
     monkeypatch.setattr(storyboard, 'source_pack', lambda topic, sources: sources)
     calls = []
