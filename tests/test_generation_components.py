@@ -133,6 +133,7 @@ def test_prepared_motion_is_hash_bound_and_has_no_preset_fallback(tmp_path):
 def test_automatic_batch_ignores_operator_topics_and_scrubs_both_workers(monkeypatch,tmp_path):
     import json,os,subprocess
     from curiosity import batch,autonomy,planner,generated_motion
+    monkeypatch.setattr(remote_ai,'free_quota_status',lambda **kwargs:{'http_status':200,'request_budget':'sufficient_for_bounded_attempt','daily_counter':'has_remaining','inference_performed':False})
     (tmp_path/'episodes').mkdir();(tmp_path/'studio.json').write_text(json.dumps({'video_count':1,'max_videos_per_run':20,'draft_model':'synthetic'}))
     monkeypatch.setattr(batch,'ROOT',tmp_path)
     for key,value in {'MODE':'automatic','VIDEO_COUNT':'1','TOPIC':'must not reach research','SOURCE_URLS':'must not reach research','OPENROUTER_API_KEY':'synthetic-private-value'}.items():monkeypatch.setenv(key,value)
@@ -282,7 +283,7 @@ def test_quota_read_never_infers_or_exposes_key_labels_counts_or_account_details
         return SimpleNamespace(status_code=200,json=lambda:{'data':{'label':'synthetic-private-label','organization_id':'synthetic-private-org','free_model_daily_requests':counter,'usage_daily':91.23}})
     monkeypatch.setattr(requests,'get',get)
     result=remote_ai.free_quota_status()
-    assert result=={'http_status':200,'daily_counter':'at_limit','count1_budget':'below_conservative_reserve','inference_performed':False}
+    assert result=={'http_status':200,'daily_counter':'at_limit','request_budget':'below_conservative_reserve','inference_performed':False}
     counter['remaining']=12
     assert remote_ai.free_quota_status()['daily_counter']=='has_remaining'
     counter['remaining']=True
@@ -297,7 +298,7 @@ def test_quota_read_failure_is_sanitized_and_never_retried(monkeypatch):
     def fail(*a,**k):
         calls.append(True);raise RuntimeError('synthetic-private-sensitive-error')
     monkeypatch.setattr(requests,'get',fail)
-    assert remote_ai.free_quota_status()=={'http_status':'unavailable','daily_counter':'unknown','count1_budget':'unknown','inference_performed':False}
+    assert remote_ai.free_quota_status()=={'http_status':'unavailable','daily_counter':'unknown','request_budget':'unknown','inference_performed':False}
     assert len(calls)==1
 
 
@@ -317,8 +318,69 @@ def test_safe_rate_limit_metadata_never_retains_raw_header_or_provider_text(monk
 def test_quota_reserve_covers_connection_and_bounded_count1_calls(monkeypatch):
     import requests
     monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-private-secret')
-    remaining=[23]
+    remaining=[24]
     monkeypatch.setattr(requests,'get',lambda *a,**k:SimpleNamespace(status_code=200,json=lambda:{'data':{'free_model_daily_requests':{'remaining':remaining[0]}}}))
-    assert remote_ai.free_quota_status()['count1_budget']=='below_conservative_reserve'
-    remaining[0]=24
-    assert remote_ai.free_quota_status()['count1_budget']=='sufficient_for_bounded_attempt'
+    assert remote_ai.free_quota_status()['request_budget']=='below_conservative_reserve'
+    remaining[0]=25
+    assert remote_ai.free_quota_status()['request_budget']=='sufficient_for_bounded_attempt'
+
+
+def test_topic_proposal_bounds_reject_and_audit_without_inventing_candidates(monkeypatch):
+    from curiosity import autonomy
+    calls=[]
+    def ask(*args):
+        calls.append(args);return {'candidates':[{'question':'','search_terms':''} for _ in range(3)]},{'usage':{'cost':'0'}}
+    monkeypatch.setattr(autonomy,'ask',ask)
+    with pytest.raises(autonomy.ResearchUnavailable) as found:autonomy.questions('synthetic',[])
+    assert len(calls)==2 and len(found.value.diagnostics['proposal_attempts'])==2
+    assert not found.value.diagnostics['operator_topic_or_source_input']
+    assert calls[0][3]['properties']['candidates']['items']['properties']['question']['minLength']==10
+    assert all(not c['accepted'] for c in found.value.diagnostics['proposal_attempts'][0]['candidate_checks'])
+
+def test_topic_proposal_retry_recovers_only_from_model_supplied_valid_candidates(monkeypatch):
+    from curiosity import autonomy
+    calls=[]
+    candidates=[{'question':f'What moves synthetic fixture {i}?','search_terms':'synthetic vector motion'} for i in range(3)]
+    def ask(*args):
+        calls.append(True)
+        if len(calls)==1:raise remote_ai.ModelOutputInvalid({'finish_reason':'length'})
+        return {'candidates':candidates},{'usage':{'cost':'0'}}
+    monkeypatch.setattr(autonomy,'ask',ask)
+    result,stats=autonomy.questions('synthetic',[])
+    assert result==candidates and len(calls)==2 and len(stats['proposal_attempts'])==2
+
+def test_topic_proposals_never_retry_account_errors(monkeypatch):
+    from curiosity import autonomy
+    calls=[]
+    def ask(*a,**k):
+        calls.append(True);raise remote_ai.ModelRequestFailed({'http_status':429,'category':'quota','reason':'rate_or_quota_limit','retry_after_seconds':60})
+    monkeypatch.setattr(autonomy,'ask',ask)
+    with pytest.raises(remote_ai.ModelRequestFailed):autonomy.questions('synthetic',[])
+    assert len(calls)==1
+
+def test_batch_retains_safe_early_model_failure_metadata(monkeypatch,tmp_path):
+    from curiosity import batch
+    import json
+    monkeypatch.setattr(batch,'ROOT',tmp_path)
+    def fail():raise remote_ai.ModelRequestFailed({'http_status':429,'category':'quota','reason':'rate_or_quota_limit','retry_after_seconds':60})
+    monkeypatch.setattr(batch,'generate',fail)
+    with pytest.raises(remote_ai.ModelRequestFailed):batch.main()
+    record=json.loads((tmp_path/'drafts/model-failure.json').read_text())
+    assert record['response_shape']['retry_after_seconds']==60 and not record['complete_video']
+
+
+def test_batch_checks_configured_request_reserve_before_any_topic_inference(monkeypatch,tmp_path):
+    from curiosity import batch,autonomy
+    import json
+    monkeypatch.setattr(batch,'ROOT',tmp_path)
+    (tmp_path/'studio.json').write_text(json.dumps({'video_count':1,'max_videos_per_run':20,'draft_model':'synthetic'}))
+    for key,value in {'MODE':'automatic','VIDEO_COUNT':'2','CURIOSITY_LLM_BACKEND':'openrouter-free'}.items():monkeypatch.setenv(key,value)
+    seen=[]
+    def budget(minimum_requests):
+        seen.append(minimum_requests);return {'http_status':200,'daily_counter':'has_remaining','request_budget':'below_conservative_reserve','inference_performed':False}
+    monkeypatch.setattr(remote_ai,'free_quota_status',budget)
+    monkeypatch.setattr(autonomy,'select_and_research',lambda *a,**k:pytest.fail('No inference without a verified request reserve'))
+    with pytest.raises(RuntimeError,match='No inference attempted'):batch.main()
+    assert seen==[46]
+    audit=json.loads((tmp_path/'drafts/quota-budget.json').read_text())
+    assert audit['video_count']==2 and not audit['inference_performed']
