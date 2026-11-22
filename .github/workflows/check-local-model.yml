@@ -6,6 +6,10 @@ on:
         description: Optional tiny local response test, not episode content
         type: boolean
         default: false
+      story_constraints:
+        description: Optional tiny synthetic dialogue word-bound probe, not an episode
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -17,6 +21,7 @@ jobs:
     timeout-minutes: 10
     env:
       RESPONSE_PROBE: ${{ inputs.response_probe }}
+      STORY_CONSTRAINTS: ${{ inputs.story_constraints }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,4 +48,7 @@ jobs:
             PYTHONPATH=src python -m curiosity.local_ai --probe-only
           else
             PYTHONPATH=src python -m curiosity.local_ai --inspect-only
+          fi
+          if [ "$STORY_CONSTRAINTS" = true ]; then
+            PYTHONPATH=src python -m curiosity.story_slots
           fi
