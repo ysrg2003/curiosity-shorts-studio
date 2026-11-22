@@ -78,7 +78,7 @@ def discover(topic,queries=None):
     return sources[:4]
 
 
-def draft(topic, target, source_urls=None, model='qwen3:4b', endpoint='http://127.0.0.1:11434', index=1, source_records=None):
+def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='http://127.0.0.1:11434', index=1, source_records=None):
     from .storyboard import source_pack,validate_story,ask,schema,SYSTEM
     if source_records is not None:
         if source_urls:raise ValueError('Do not mix supplied URLs with retrieved source records')
