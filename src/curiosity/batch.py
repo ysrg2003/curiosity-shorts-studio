@@ -1,6 +1,7 @@
 """GitHub Actions entry point, inputs read as data rather than interpolated shell."""
 import json
 import os
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -21,8 +22,9 @@ def main():
     elif mode=='new-topic':
         from .planner import draft
         topic=os.environ.get('TOPIC','Why do we get goosebumps?').strip()
-        topics=[x.strip() for x in topic.splitlines() if x.strip()]
-        source_urls=[x.strip() for x in os.environ.get('SOURCE_URLS','').splitlines() if x.strip()]
+        topics=[x.strip() for x in re.split(r"[;\n]+",topic) if x.strip()]
+        if not topics: raise ValueError("Supply at least one topic")
+        source_urls=[x for x in re.split(r'[\s;]+',os.environ.get('SOURCE_URLS','').strip()) if x]
         summaries=[]
         for i in range(count):
             # A topic per line gives distinct topics; one topic supports distinct dialogue variations.
