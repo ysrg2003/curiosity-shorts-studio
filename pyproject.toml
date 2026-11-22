@@ -13,6 +13,9 @@ dependencies = ["Pillow==11.3.0", "edge-tts==7.3.1", "numpy==2.2.6", "soundfile=
 test = ["pytest==8.4.1", "PyYAML==6.0.2"]
 local-voice = ["kokoro-onnx==0.6.1"]
 motion = ["manim==0.20.1"]
+generated-motion = ["paper2video @ git+https://github.com/edwardyen724-g/paper2video@c713646c47d5ab3fc1085f733800750cfa235596"]
+research = ["trafilatura==2.3.1", "pypdf==7.1.1"]
+free-ai = ["ai-provider-router @ git+https://github.com/ysrg2003/ai-provider-router.git@dae4ce4cd5a2b0bc231a58c4532cbe7c6d991be8"]
 
 [project.scripts]
 curiosity = "curiosity.cli:main"
