@@ -7,7 +7,6 @@ from .planner import fetch,public_url,source_bytes,source_error,SourceValidation
 from .storyboard import ask
 
 from functools import lru_cache
-import re
 import unicodedata
 
 STOP = frozenset('a an and are as at be because been being by can could did do does for from had has have how i if in into is it its may might not of on or our should so than that the their them there these they this those to under up was we were what when where which while who why will with without would you your'.split())
@@ -163,7 +162,7 @@ def research(question,terms,subject_query=""):
     # Discover every query before any article read. Search hypotheses are not facts.
     sources=[];groups=set();attempted=[];discovery=[];seen_pages=set();seen_urls=set()
     queries=list(dict.fromkeys(([subject_query] if subject_query else [])+[terms,question]));pools=[]
-    def report():return {'question':question,'queries':queries,'publishers':sorted(groups),'discovery':discovery,'retrieval_attempts':attempted,'all_query_discovery_precedes_reference_reads':True,'not_a_truth_guarantee':True}
+    def report():return {'question':question,'queries':queries,'publishers':sorted(groups),'discovery':discovery,'retrieval_attempts':attempted,'all_query_discovery_precedes_reference_reads':True,'not_a_truth_guarantee':True,'retrieval_model':'cross-encoder/ms-marco-MiniLM-L6-v2','retrieval_window_tokens':512,'retrieval_logits_are_not_probabilities':True}
     for query in queries:
         try:pages=wiki_pages(query)
         except (ValueError,OSError) as error:
@@ -180,14 +179,17 @@ def research(question,terms,subject_query=""):
             page_id=page.get('pageid')
             if page_id is None or page_id in seen_pages:continue
             seen_pages.add(page_id)
-            # A subject phrase is only a retrieval anchor, not scientific approval.
-            title=page.get('title','');intro=page.get('extract','')
-            keep=not subject_query or subject_overlap(subject_query,title)>=0.5 or subject_overlap(subject_query,intro)>=0.75
-            discovery.append({'page_id':page_id,'page_title':title,'status':'subject_retrieval_candidate' if keep else 'subject_mismatch_skipped',
-                              'retrieval_only':True,'query':queries[query_index]})
-            if keep:pages.append({**page,'query_index':query_index})
-    weights=rank_texts((subject_query or question)+' '+question,[page.get('title','')+' '+page.get('title','')+' '+page.get('extract','')[:4000] for page in pages])
-    pages=[page for _,page in sorted(zip(weights,pages),key=lambda row:-row[0])]
+            pages.append({**page,'query_index':query_index})
+    from .entailment import relevance_scores
+    page_passages=[(page.get('title','')+'. '+page.get('extract',''))[:6000] or 'Empty discovery result.' for page in pages]
+    weights=relevance_scores(question,page_passages)
+    ordered=sorted(zip(weights,pages),key=lambda row:-row[0])
+    # A fixed retrieval shortlist, never a scientific acceptance threshold.
+    pages=[page for _,page in ordered[:5]]
+    for score,page in ordered:
+        discovery.append({'page_id':page['pageid'],'page_title':page.get('title',''),
+                          'status':'semantic_retrieval_candidate' if page in pages else 'outside_semantic_shortlist',
+                          'retrieval_logit':score,'retrieval_only':True,'query':queries[page['query_index']]})
     intro=next((page for page in pages if len(page.get('extract',''))>=450),None)
     if intro:
         sources.append({'url':public_url(intro['fullurl']),'title':intro.get('title',''),'text':intro['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API','source_scope':'encyclopedia_introduction'})
@@ -207,16 +209,16 @@ def research(question,terms,subject_query=""):
         eligible=[]
         for url in urls:
             citation=context.get(url,'')
-            # Missing citation text can still be ranked from URL, but known unrelated
-            # citation context cannot consume an article request just for its hostname.
-            keep=not subject_query or subject_overlap(subject_query,citation+' '+urlparse(url).path)>0
-            if keep:eligible.append(url)
+            eligible.append(url)
         discovery.append({'page_id':page_id,'status':'references_ranked','citation_links':len(links),'eligible_unique_links':len(urls),
-                          'subject_matched_links':len(eligible),'ranking_is_not_truth_verification':True})
+                          'retrieval_candidate_links':len(eligible),'ranking_is_not_truth_verification':True})
         queue={'page_id':page_id,'query':queries[query_index],'urls':eligible,'attempts':0};queues.append(queue)
         for url in eligible:reference_candidates.append({'url':url,'queue':queue,'text':context.get(url,'')+' '+urlparse(url).path})
-    ref_weights=rank_texts((subject_query or question)+' '+question,[item['text'] for item in reference_candidates])
-    reference_candidates=[item for _,item in sorted(zip(ref_weights,reference_candidates),key=lambda row:-row[0])]
+    # Cheap lexical pre-ranking only limits work for the semantic component.
+    lexical=rank_texts((subject_query or question)+' '+question,[item['text'] for item in reference_candidates])
+    reference_candidates=[item for _,item in sorted(zip(lexical,reference_candidates),key=lambda row:-row[0])][:120]
+    ref_weights=relevance_scores(question,[(item['text'] or 'Citation URL without context.')[:6000] for item in reference_candidates])
+    reference_candidates=[{**item,'retrieval_logit':score} for score,item in sorted(zip(ref_weights,reference_candidates),key=lambda row:-row[0])]
     # One globally ranked queue, while retaining each page's six-read cap and the
     # overall ten-read cap. An irrelevant query pool no longer gets equal turns.
     while len(attempted)<10:
@@ -224,7 +226,7 @@ def research(question,terms,subject_query=""):
         if candidate is None:break
         queue=candidate['queue'];url=candidate['url']
         seen_urls.add(url);queue['attempts']+=1
-        record={'requested_url':url,'discovery_page_id':queue['page_id'],'discovery_query':queue['query']};attempted.append(record)
+        record={'requested_url':url,'discovery_page_id':queue['page_id'],'discovery_query':queue['query'],'retrieval_logit':candidate['retrieval_logit'],'retrieval_not_a_truth_guarantee':True};attempted.append(record)
         try:
             source=article(url);group=publisher(source['url'])
             if not eligible_reference(source['url']):
@@ -236,7 +238,7 @@ def research(question,terms,subject_query=""):
     # The first readable but unrelated paper must not suppress its better references.
     encyclopedias=[source for source in sources if publisher(source['url'])=='wikipedia.org']
     articles=[source for source in sources if publisher(source['url'])!='wikipedia.org']
-    article_weights=rank_texts((subject_query or question)+' '+question,[source.get('title','')+' '+source.get('title','')+' '+source['text'][:6000] for source in articles])
+    article_weights=relevance_scores(question,[(source.get('title','')+'. '+source['text'])[:6000] for source in articles])
     weighted=sorted(zip(article_weights,articles),key=lambda row:-row[0])
     ranked=[source for _,source in weighted]
     weight_by_url={source['url']:weight for weight,source in weighted}
