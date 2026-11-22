@@ -75,13 +75,26 @@ def validate_story(obj,sources,minimum=155,maximum=255):
     return {'words':words,'explanation_beats':len(explains),'source_records_used':len(used)}
 
 
+def inference_schema(value):
+    """Constrain JSON structure, not token-level prose. Validate the full schema afterward."""
+    if isinstance(value, list): return [inference_schema(item) for item in value]
+    if not isinstance(value, dict): return value
+    return {key: inference_schema(item) for key, item in value.items()
+            if not (value.get('type') == 'string' and key in {'pattern', 'minLength', 'maxLength'})}
+
+
 def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,effort='none'):
     import os
     if os.environ.get('CURIOSITY_LLM_BACKEND')=='openrouter-free':
         from .remote_ai import request
-        return request(json.dumps(prompt,ensure_ascii=False),system,schema=schema,effort=effort)
+        obj,stats=request(json.dumps(prompt,ensure_ascii=False),system,schema=inference_schema(schema),effort=effort)
+        from jsonschema import Draft202012Validator
+        if not Draft202012Validator(schema).is_valid(obj):
+            from .remote_ai import ModelOutputInvalid
+            raise ModelOutputInvalid({'backend':'openrouter-free','validation':'full_client_schema_invalid'})
+        return obj,stats
     payload={'model':model,'system':system,'prompt':json.dumps(prompt,ensure_ascii=False),
-             'format':schema,'stream':False,'think':False,'keep_alive':'15m',
+             'format':inference_schema(schema),'stream':False,'think':False,'keep_alive':'15m',
              'options':{'temperature':0.35,'num_ctx':8192,'num_predict':5000,'num_thread':4,'seed':seed}}
     req=Request(endpoint.rstrip('/')+'/api/generate',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
     with urlopen(req,timeout=1500) as r:result=json.load(r)
