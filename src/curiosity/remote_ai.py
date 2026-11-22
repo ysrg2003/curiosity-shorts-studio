@@ -31,8 +31,8 @@ def check_free_catalog():
         if value is not None and Decimal(str(value))!=0:raise ValueError('Model pricing is no longer zero. No request sent.')
     required={'response_format','structured_outputs','reasoning_effort'}
     reasoning=model.get('reasoning') or {}
-    if not required.issubset(set(model.get('supported_parameters',[]))) or reasoning.get('mandatory') is not False or 'none' not in (reasoning.get('supported_efforts') or []):
-        raise ValueError('The free model no longer advertises structured output and supported reasoning-off control. No request sent.')
+    if not required.issubset(set(model.get('supported_parameters',[]))) or reasoning.get('mandatory') is not False or not {'none','low'}.issubset(set(reasoning.get('supported_efforts') or [])):
+        raise ValueError('The free model no longer advertises structured output and supported reasoning-off/low controls. No request sent.')
     return {item['id'] for item in data.get('data',[]) if isinstance(item.get('id'),str)}
 
 
@@ -76,7 +76,8 @@ def object_from_text(text):
     return candidates[-1]
 
 
-def request(prompt,system,schema=None,json_mode=False):
+def request(prompt,system,schema=None,json_mode=False,effort='none'):
+    if effort not in {'none','low'}:raise ValueError('Unsupported controlled reasoning profile. No request sent.')
     key=os.environ.get('OPENROUTER_API_KEY','').strip()
     if not key:raise ValueError('Missing OPENROUTER_API_KEY Actions secret. Never put its value in code or logs.')
     public_models=check_free_catalog()
@@ -106,7 +107,7 @@ def request(prompt,system,schema=None,json_mode=False):
             if isinstance(body.get('usage'),dict):shape['usage']=checked_usage(body['usage'])
             return body
     # Use only an explicit free model whose live catalog advertises reasoning-off support.
-    profile={'max_tokens_field':'max_tokens','max_tokens':12000,'reasoning_effort':'none'}
+    profile={'max_tokens_field':'max_tokens','max_tokens':12000,'reasoning_effort':effort}
     if schema:profile.update(response_format={'type':'json_schema','json_schema':{'name':'curiosity_response','schema':strict_schema(schema),'strict':True}},response_parser='json_or_text_envelope')
     elif json_mode:profile.update(response_format='json_object',response_parser='json_or_text_envelope')
     else:profile.update(response_format='none',response_parser='text_envelope')
@@ -139,10 +140,10 @@ def request(prompt,system,schema=None,json_mode=False):
             from jsonschema import Draft202012Validator
             if not Draft202012Validator(strict_schema(schema)).is_valid(output):raise ModelOutputInvalid(shape)
     else:output=output['text']
-    return output,{'backend':'openrouter-free','model':MODEL,'usage':usage,'paid_fallback_allowed':False,'response_shape':shape,'complete_json_extracted':extracted}
+    return output,{'backend':'openrouter-free','model':MODEL,'usage':usage,'paid_fallback_allowed':False,'response_shape':shape,'complete_json_extracted':extracted,'reasoning_effort':effort}
 
 
-def free_quota_status(minimum_requests=25):
+def free_quota_status(minimum_requests=28):
     """Read only the documented current-key daily counter; never retain labels or account details."""
     key=os.environ.get('OPENROUTER_API_KEY','').strip()
     if not key:raise ValueError('Missing OPENROUTER_API_KEY Actions secret. No request sent.')
@@ -157,7 +158,7 @@ def free_quota_status(minimum_requests=25):
         remaining=counter.get('remaining')
         if type(remaining) is int:
             result['daily_counter']='at_limit' if remaining<=0 else 'has_remaining'
-            # Count1 worst case:2proposals+3drafts+3reviews+5visuals*3code attempts=23calls, plus2connection checks.
+            # Count1 worst case:2proposals+3relevance screens+3drafts+3reviews+5visuals*3code attempts=26calls, plus2connection checks.
             result['request_budget']='sufficient_for_bounded_attempt' if remaining>=minimum_requests else 'below_conservative_reserve'
         return result
     except Exception:
