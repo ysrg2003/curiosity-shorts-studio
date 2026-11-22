@@ -12,8 +12,13 @@ def verify():
     if not installed or installed.get('digest')!=MANIFEST:raise ValueError('Local model manifest differs from the inspected non-thinking instruct model')
     request=Request('http://127.0.0.1:11434/api/show',data=json.dumps({'model':MODEL}).encode(),headers={'Content-Type':'application/json'})
     with urlopen(request,timeout=10) as response:shown=json.load(response)
-    if shown.get('thinking',{}).get('values')!=[False]:raise ValueError('Local model does not explicitly advertise non-thinking-only control')
-    return {'local_model':MODEL,'manifest_verified':True,'non_thinking_only':True,'inference_performed':False}
+    caps=shown.get('capabilities')
+    if not isinstance(caps,list) or 'completion' not in caps or 'thinking' in caps:raise ValueError('Pinned instruct model has missing or conflicting capabilities')
+    # The pinned provider instruct model is non-thinking. Legacy Go templates may
+    # omit thinking metadata in this server version; absence alone proves nothing.
+    if 'thinking' in shown and (not isinstance(shown['thinking'],dict) or shown['thinking'].get('values')!=[False]):raise ValueError('Pinned instruct model has conflicting non-thinking-only metadata')
+    origin='explicit_show_metadata' if 'thinking' in shown else 'pinned_instruct_manifest_and_capabilities'
+    return {'local_model':MODEL,'manifest_verified':True,'non_thinking_only':True,'thinking_control_source':origin,'inference_performed':False}
 
 
 if __name__=='__main__':
