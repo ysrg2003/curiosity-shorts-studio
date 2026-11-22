@@ -142,3 +142,32 @@ def test_private_redirect_rejected_before_request(monkeypatch):
     from curiosity.planner import PublicRedirects
     with pytest.raises(ValueError):
         PublicRedirects().redirect_request(None,None,302,'Moved',{},'https://127.0.0.1/private')
+
+
+def test_native_phoneme_word_boundaries():
+    from types import SimpleNamespace as P
+    from curiosity.alignment import align_words
+    class Tokenizer:
+        def phonemize(self,word,lang):return word
+    ph=[P(phoneme=c,start=i/10,end=(i+1)/10) for i,c in enumerate('hi ray')]
+    cues,coverage=align_words('hi ray',ph,Tokenizer())
+    assert cues[0]['end']==0.2 and cues[1]['start']==0.3
+    assert coverage==1
+
+
+def test_reduced_function_word_stays_with_native_neighbors():
+    from types import SimpleNamespace as P
+    from curiosity.alignment import align_words
+    class Tokenizer:
+        def phonemize(self,word,lang):return {'not':'nɑt','a':'eɪ','monster':'mɔnstər'}[word]
+    ph=[P(phoneme=c,start=i/10,end=(i+1)/10) for i,c in enumerate('nɑɾə mɔnstər')]
+    cues,_=align_words('not a monster',ph,Tokenizer())
+    assert cues[1]['source']=='reduced-phoneme-interpolation'
+    assert cues[0]['end']<=cues[1]['start']<cues[1]['end']<=cues[2]['start']
+
+
+def test_audio_envelope_has_real_silence():
+    import numpy as np
+    from curiosity.alignment import envelope
+    env=envelope(np.r_[np.zeros(50),np.ones(50)],100,hz=10)
+    assert env[:5]==[0]*5 and env[5:]==[1]*5
