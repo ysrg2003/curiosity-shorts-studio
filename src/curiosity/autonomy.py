@@ -20,14 +20,23 @@ def eligible_reference(url):
 
 
 def questions(model,previous,endpoint='http://127.0.0.1:11434',seed=43):
-    schema={'type':'object','properties':{'candidates':{'type':'array','minItems':3,'maxItems':3,'items':{'type':'object','properties':{'question':{'type':'string'},'search_terms':{'type':'string'}},'required':['question','search_terms']}}},'required':['candidates']}
-    data,stats=ask(model,'Propose exactly3distinct, visually explainable everyday science questions for a playful English educational cartoon. Choose from physics, chemistry, astronomy, weather or ordinary nonmedical biology. Do not propose medical advice, disease, politics, product claims or current events. These are unverified research hypotheses, not factual answers. Avoid the supplied previous topics. Each question is under110characters. search_terms names its precise scientific mechanism. Return JSON only. /no_think',{'previous_topics':previous[-100:]},schema,endpoint,seed)
-    result=[]
-    for item in data.get('candidates',[]):
-        q=str(item.get('question','')).strip();terms=str(item.get('search_terms','')).strip()
-        if 10<=len(q)<=110 and 3<=len(terms)<=150 and not duplicate(q,previous):result.append({'question':q,'search_terms':terms})
-    if not result:raise ValueError('No valid unseen topic hypotheses. No video created.')
-    return result,stats
+    from .remote_ai import ModelOutputInvalid
+    schema={'type':'object','properties':{'candidates':{'type':'array','minItems':3,'maxItems':3,'items':{'type':'object','properties':{'question':{'type':'string','minLength':10,'maxLength':110},'search_terms':{'type':'string','minLength':3,'maxLength':150}},'required':['question','search_terms']}}},'required':['candidates']}
+    attempts=[]
+    for attempt in range(2):
+        try:
+            data,stats=ask(model,'Propose exactly 3 distinct, visually explainable everyday science questions for a playful English educational cartoon. Choose from physics, chemistry, astronomy, weather or ordinary nonmedical biology. Do not propose medical advice, disease, politics, product claims or current events. These are unverified research hypotheses, not factual answers. Avoid the supplied previous topics. Each question is 10 to 110 characters. search_terms is 3 to 150 characters and names its precise scientific mechanism. Return JSON only. /no_think',{'previous_topics':previous[-100:],'proposal_variation':attempt+1,'revision_feedback':attempts[-1].get('rejected') if attempts else ''},schema,endpoint,seed+attempt)
+        except ModelOutputInvalid as error:
+            attempts.append({'attempt':attempt+1,'rejected':'schema_invalid','response_shape':error.metadata});continue
+        result=[];checks=[]
+        for item in data.get('candidates',[]):
+            q=str(item.get('question','')).strip();terms=str(item.get('search_terms','')).strip()
+            repeated=duplicate(q,previous);valid=10<=len(q)<=110 and 3<=len(terms)<=150 and not repeated
+            checks.append({'question_characters':len(q),'search_characters':len(terms),'duplicate':repeated,'accepted':valid})
+            if valid:result.append({'question':q,'search_terms':terms})
+        attempts.append({'attempt':attempt+1,'selection':stats,'candidate_checks':checks,'rejected':None if result else 'no_unseen_in_bounds_candidate'})
+        if result:return result,{**stats,'proposal_attempts':attempts}
+    raise ResearchUnavailable('No valid unseen topic hypotheses after 2 bounded proposals. No video created.',{'proposal_attempts':attempts,'operator_topic_or_source_input':False})
 
 
 def duplicate(question,previous):
