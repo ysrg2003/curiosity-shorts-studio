@@ -22,3 +22,8 @@ The language-frequency snapshot is not a complete or current dictionary. The nar
 rank-bm25 0.2.2 by D. Brown and contributors, Apache-2.0: https://github.com/dorianbrown/rank_bm25 and https://pypi.org/project/rank-bm25/ . This project installs the package and uses BM25L to rank its small discovery/citation/document collections. No source-code fork or scientific claim is implied.
 
 snowballstemmer 3.1.1 by the Snowball Developers, BSD-3-Clause: https://pypi.org/project/snowballstemmer/3.1.1/ . English stemming is applied consistently to query/candidate text. The package is installed, not copied. Stems and relevance scores are retrieval aids, never truth or evidence-entailment decisions.
+
+
+## Semantic passage reranker
+
+`cross-encoder/ms-marco-MiniLM-L6-v2`, revision `233902d25c440f23af6f7d6e94d2946bac0bee0a`. Model card: https://huggingface.co/cross-encoder/ms-marco-MiniLM-L6-v2 . The model is trained for MS MARCO passage ranking and declares Apache-2.0. This project downloads the pinned CPU ONNX quantization and tokenizer with exact size/SHA256 verification, not Python pickle weights or remote model code. Scores order retrieval only and do not replace scientific acceptance or the separate evidence-entailment model. Upstream GPU benchmark throughput is not a CPU performance promise.
