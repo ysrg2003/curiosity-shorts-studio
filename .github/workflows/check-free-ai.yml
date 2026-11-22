@@ -25,7 +25,7 @@ jobs:
           from curiosity.remote_ai import request,free_quota_status
           quota=free_quota_status()
           print(json.dumps(quota,sort_keys=True))
-          if quota['http_status']!=200 or quota['count1_budget']!='sufficient_for_bounded_attempt':
+          if quota['http_status']!=200 or quota['request_budget']!='sufficient_for_bounded_attempt':
             print('Stopped before inference: conservative count-1 request reserve is unavailable or unverified.')
             raise SystemExit(1)
           for mode in ['plaintext','strict-json']:
