@@ -23,19 +23,19 @@ def eligible_reference(url):
 
 def questions(model,previous,endpoint='http://127.0.0.1:11434',seed=43):
     from .remote_ai import ModelOutputInvalid
-    schema={'type':'object','properties':{'candidates':{'type':'array','minItems':3,'maxItems':3,'items':{'type':'object','properties':{'question':{'type':'string','minLength':10,'maxLength':110},'search_terms':{'type':'string','minLength':3,'maxLength':150}},'required':['question','search_terms']}}},'required':['candidates']}
+    schema={'type':'object','properties':{'candidates':{'type':'array','minItems':3,'maxItems':3,'items':{'type':'object','properties':{'question':{'type':'string','minLength':10,'maxLength':110},'search_terms':{'type':'string','minLength':3,'maxLength':150},'subject_query':{'type':'string','minLength':3,'maxLength':80}},'required':['question','search_terms','subject_query']}}},'required':['candidates']}
     attempts=[]
     for attempt in range(2):
         try:
-            data,stats=ask(model,'Propose exactly 3 distinct, visually explainable everyday science questions for a playful English educational cartoon. Choose from physics, chemistry, astronomy, weather or ordinary nonmedical biology. Do not propose medical advice, disease, politics, product claims or current events. These are unverified research hypotheses, not factual answers. Avoid the supplied previous topics. Each question is 10 to 110 characters. search_terms is 3 to 150 characters and names its precise scientific mechanism. Return JSON only. /no_think',{'previous_topics':previous[-100:],'proposal_variation':attempt+1,'revision_feedback':attempts[-1].get('rejected') if attempts else ''},schema,endpoint,seed+attempt)
+            data,stats=ask(model,'Propose exactly 3 distinct, visually explainable everyday science questions for a playful English educational cartoon. Choose from physics, chemistry, astronomy, weather or ordinary nonmedical biology. Do not propose medical advice, disease, politics, product claims or current events. These are unverified research hypotheses, not factual answers. Avoid the supplied previous topics. Each question is 10 to 110 characters. subject_query is a 1 to 6 word encyclopedia-style subject phrase, 3 to 80 characters, naming the observable subject of the question, not its proposed cause. Include a domain qualifier if ambiguous. search_terms is 3 to 150 characters and names a proposed mechanism as an unverified search hypothesis, never an established fact. Return JSON only. /no_think',{'previous_topics':previous[-100:],'proposal_variation':attempt+1,'revision_feedback':attempts[-1].get('rejected') if attempts else ''},schema,endpoint,seed+attempt)
         except ModelOutputInvalid as error:
             attempts.append({'attempt':attempt+1,'rejected':'schema_invalid','response_shape':error.metadata});continue
         result=[];checks=[]
         for item in data.get('candidates',[]):
-            q=str(item.get('question','')).strip();terms=str(item.get('search_terms','')).strip()
-            repeated=duplicate(q,previous);valid=10<=len(q)<=110 and 3<=len(terms)<=150 and not repeated
-            checks.append({'question_characters':len(q),'search_characters':len(terms),'duplicate':repeated,'accepted':valid})
-            if valid:result.append({'question':q,'search_terms':terms})
+            q=str(item.get('question','')).strip();terms=str(item.get('search_terms','')).strip();subject=str(item.get('subject_query','')).strip()
+            repeated=duplicate(q,previous);valid=10<=len(q)<=110 and 3<=len(terms)<=150 and 3<=len(subject)<=80 and 1<=len(subject.split())<=6 and bool(research_words(q)&research_words(subject)) and not repeated
+            checks.append({'question_characters':len(q),'search_characters':len(terms),'subject_characters':len(subject),'subject_is_unverified_query':True,'duplicate':repeated,'accepted':valid})
+            if valid:result.append({'question':q,'search_terms':terms,'subject_query':subject})
         attempts.append({'attempt':attempt+1,'selection':stats,'candidate_checks':checks,'rejected':None if result else 'no_unseen_in_bounds_candidate'})
         if result:return result,{**stats,'proposal_attempts':attempts}
     raise ResearchUnavailable('No valid unseen topic hypotheses after 2 bounded proposals. No video created.',{'proposal_attempts':attempts,'operator_topic_or_source_input':False})
@@ -113,12 +113,25 @@ def document_resolution(requested,final,is_pdf):
     if not is_pdf and urlparse(final).path.rstrip('/')=='':raise SourceValidationError('generic_website_root','Reference resolved to a generic website root, not an article')
 
 
-def research(question,terms):
+def research_words(text):
+    filler={'why','how','who','can','are','the','and','for','you','your','our','its','was','were','not','but','than','then','what','when','where','which','does','that','this','with','from','have','about','they','their','into','would','could','should','without'}
+    return {word.replace('colour','color').rstrip('s') for word in re.findall(r'[a-z]{3,}',text.lower()) if word not in filler}
+
+
+def document_rank(source,question,subject):
+    # Discovery ranking only. Scientific acceptance remains a later independent gate.
+    target=research_words(question+' '+subject)
+    title=research_words(source.get('title',''))
+    body=research_words(source['text'])
+    return 4*len(target&title)+len(target&body)
+
+
+def research(question,terms,subject_query=""):
     # Discover both query pools before any article read can consume the budget.
     # Mechanism-first text anchors the encyclopedia excerpt; references are interleaved.
     from itertools import zip_longest
     sources=[];groups=set();attempted=[];discovery=[];seen_pages=set();seen_urls=set()
-    queries=list(dict.fromkeys([terms,question]));pools=[]
+    queries=list(dict.fromkeys(([subject_query] if subject_query else [])+[terms,question]));pools=[]
     def report():return {'question':question,'queries':queries,'publishers':sorted(groups),'discovery':discovery,'retrieval_attempts':attempted,'all_query_discovery_precedes_reference_reads':True,'not_a_truth_guarantee':True}
     for query in queries:
         try:pages=wiki_pages(query)
@@ -133,7 +146,7 @@ def research(question,terms):
     for pages in pools:
         intro=next((page for page in pages if len(page.get('extract',''))>=450),None)
         if intro:
-            sources.append({'url':public_url(intro['fullurl']),'title':intro.get('title',''),'text':intro['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API'})
+            sources.append({'url':public_url(intro['fullurl']),'title':intro.get('title',''),'text':intro['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API','source_scope':'encyclopedia_introduction'})
             groups.add('wikipedia.org');break
     queues=[]
     for row in zip_longest(*pools):
@@ -158,23 +171,68 @@ def research(question,terms):
             if queue['attempts']>=6:continue
             while queue['urls']:
                 url=queue['urls'].pop(0)
-                if publisher(url) not in groups and url not in seen_urls:break
+                if url not in seen_urls:break
             else:continue
             seen_urls.add(url);queue['attempts']+=1
             record={'requested_url':url,'discovery_page_id':queue['page_id'],'discovery_query':queue['query']};attempted.append(record)
             try:
                 source=article(url);group=publisher(source['url'])
-                if not eligible_reference(source['url']) or group in groups:
+                if not eligible_reference(source['url']):
                     record['status']='ineligible_or_duplicate_resolved_publisher';continue
-                sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'])
+                sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'],title=source.get('title',''),source_scope=source.get('source_scope','article_excerpt'),characters=len(source['text']))
             except Exception as error:
                 record.update(status='unreadable',error_type=type(error).__name__,transport=source_error(error));continue
-            if len(groups)>=4:return sources,report()
-    if len(groups)>=2:return sources,report()
+    # Read the same bounded queue before choosing one candidate per publisher.
+    # The first readable but unrelated paper must not suppress its better references.
+    encyclopedias=[source for source in sources if publisher(source['url'])=='wikipedia.org']
+    articles=[source for source in sources if publisher(source['url'])!='wikipedia.org']
+    ranked=sorted(articles,key=lambda source:-document_rank(source,question,subject_query))
+    selected=encyclopedias[:1];selected_groups={publisher(source['url']) for source in selected}
+    candidates=[{'url':source['url'],'title':source.get('title',''),'publisher':publisher(source['url']),
+                 'source_scope':source.get('source_scope','article_excerpt'),
+                 'retrieval_rank':document_rank(source,question,subject_query)} for source in ranked]
+    for source in ranked:
+        group=publisher(source['url'])
+        if group in selected_groups:continue
+        selected.append(source);selected_groups.add(group)
+        if len(selected)>=4:break
+    sources=selected;groups=selected_groups
+    if len(groups)>=2:return sources,{**report(),'document_candidates':candidates,'subject_query_is_not_fact':True}
+
     raise ResearchUnavailable('No two readable publisher groups from live research. No unsupported fallback or video.',report())
 
 
+def pubmed_abstract(url):
+    """Use the documented public Europe PMC record endpoint, not PubMed page chrome."""
+    from .planner import TextOnly
+    parsed=urlparse(url)
+    if parsed.hostname!='pubmed.ncbi.nlm.nih.gov' or not re.fullmatch(r'/[0-9]{1,10}/?',parsed.path):
+        raise SourceValidationError('not_pubmed_record','Not a numeric PubMed record URL')
+    public_url(url)
+    identifier=parsed.path.strip('/')
+    endpoint='https://www.ebi.ac.uk/europepmc/webservices/rest/article/MED/'+identifier+'?'+urlencode({'resultType':'core','format':'json'})
+    data=fetch(endpoint)
+    if not isinstance(data,dict):raise SourceValidationError('abstract_record_shape','Structured abstract response is not a record')
+    record=data.get('result',{})
+    if not isinstance(record,dict):raise SourceValidationError('abstract_record_shape','Structured abstract response is not a record')
+    if data.get('hitCount')!=1 or record.get('source')!='MED' or record.get('id')!=identifier or record.get('pmid')!=identifier:
+        raise SourceValidationError('abstract_identity_mismatch','Structured abstract identity did not match requested record')
+    abstract=record.get('abstractText','')
+    if not isinstance(abstract,str) or not abstract.strip():
+        raise SourceValidationError('abstract_missing','Structured record contains no abstract')
+    parser=TextOnly();parser.feed(abstract)
+    text=re.sub(r'\s+',' ',' '.join(parser.parts)).strip()
+    # Keep the existing text-size floor. Do not pad abstracts with metadata.
+    if len(text)<700:raise SourceValidationError('abstract_too_short','Abstract too short for source checks')
+    return {'url':url,'requested_url':url,'retrieval_url':endpoint,'pmid':identifier,
+            'title':record.get('title',''),'text':text[:18000],'publisher':publisher(url),
+            'source_scope':'abstract_only','publication_year':record.get('pubYear',''),
+            'extraction_method':'Europe PMC structured PubMed abstract API',
+            'text_sha256':hashlib.sha256(text.encode()).hexdigest()}
+
+
 def article(url):
+    if urlparse(url).hostname=='pubmed.ncbi.nlm.nih.gov':return pubmed_abstract(url)
     # Reuse the public-source safety checks, then the Apache-licensed Trafilatura extractor.
     import trafilatura
     final,raw,_=source_bytes(url)
@@ -195,7 +253,7 @@ def article(url):
     text=re.sub(r'\s+',' ',data.get('text') or '').strip()
     if len(text)<700:raise SourceValidationError('article_too_short','Article too short for source checks')
     return {'url':final,'requested_url':url,'title':data.get('title') or '', 'text':text[:18000],
-            'publisher':publisher(final),'extraction_method':method,'text_sha256':hashlib.sha256(text.encode()).hexdigest()}
+            'publisher':publisher(final),'source_scope':'article_excerpt','extraction_method':method,'text_sha256':hashlib.sha256(text.encode()).hexdigest()}
 
 
 def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43):
@@ -204,7 +262,7 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
     for item in candidates:
         report=None
         try:
-            sources,report=research(item['question'],item['search_terms'])
+            sources,report=research(item['question'],item['search_terms'],item.get('subject_query',''))
             from .evidence import screen
             from .storyboard import source_pack
             relevant,relevance=screen(item['question'],source_pack(item['question'],sources),model,endpoint)
