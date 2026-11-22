@@ -121,3 +121,134 @@ def test_script_preflight_research_failure_cannot_emit_success(monkeypatch, tmp_
 
 def test_portrait_lint_allows_explicit_safe_positions():
     assert not generated_motion.portrait_lint('obj.move_to(LEFT * 2 + UP * 1)\nfit(obj,max_w=3.5)')
+
+
+def test_removed_string_limits_are_visible_in_prompt_and_failure_fields(monkeypatch):
+    captured = []
+    def response(request, **kwargs):
+        captured.append(json.loads(request.data))
+        return io.StringIO(json.dumps({'response': '{"answer":"Synthetic response is too long."}',
+                                      'eval_count': 12, 'prompt_eval_count': 30,
+                                      'total_duration': 1000000000, 'done_reason': 'stop'}))
+    monkeypatch.setenv('CURIOSITY_LLM_BACKEND', 'ollama')
+    monkeypatch.setattr(storyboard, 'urlopen', response)
+    schema = {'type': 'object', 'properties': {'answer': {'type': 'string', 'maxLength': 10}}, 'required': ['answer']}
+    saved = deepcopy(schema)
+    with pytest.raises(remote_ai.ModelOutputInvalid) as found:
+        storyboard.ask('synthetic', 'synthetic fixture only', {'synthetic': True}, schema)
+    failure = found.value.metadata
+    assert failure['violations'] == [{'path': ['answer'], 'rule': 'maxLength', 'characters': 31,
+                                       'words': 5, 'required': 10}]
+    assert 'Synthetic response' not in str(failure)
+    assert failure['generation']['output_tokens'] == 12
+    payload = captured[0]
+    assert payload['format']['properties']['answer'] == {'type': 'string'}
+    prompt = json.loads(payload['prompt'])
+    assert prompt['prose_output_contract'] == [{'paths': ['answer'], 'maxLength': 10}]
+    assert prompt['request'] == {'synthetic': True} and schema == saved
+
+
+def test_string_contract_compacts_identical_bounds_without_dropping_any_path():
+    schema = {'type': 'object', 'properties': {
+        'one': {'type': 'string', 'maxLength': 5},
+        'two': {'type': 'array', 'items': {'type': 'string', 'maxLength': 5}},
+        'three': {'type': 'string', 'pattern': '^test$'}}}
+    assert storyboard.string_contract(schema) == [
+        {'paths': ['one', 'two[]'], 'maxLength': 5},
+        {'paths': ['three'], 'pattern': '^test$'}]
+
+
+def test_remote_path_preserves_same_full_contract_and_specific_diagnostics(monkeypatch):
+    captured = []
+    def request(prompt, system, **kwargs):
+        captured.append(json.loads(prompt))
+        return {'answer': 'long synthetic fixture'}, {'synthetic': True}
+    monkeypatch.setenv('CURIOSITY_LLM_BACKEND', 'openrouter-free')
+    monkeypatch.setattr(remote_ai, 'request', request)
+    schema = {'type': 'object', 'properties': {'answer': {'type': 'string', 'maxLength': 2}}}
+    with pytest.raises(remote_ai.ModelOutputInvalid) as found:
+        storyboard.ask('synthetic', 'synthetic', {}, schema)
+    assert found.value.metadata['violations'][0]['path'] == ['answer']
+    assert captured[0]['prose_output_contract'][0]['maxLength'] == 2
+
+
+def source_contract_fixture():
+    sources = [{'url': 'https://example.org/fixture', 'text': 'Synthetic objects move inside this fictional bounded test fixture.'},
+               {'url': 'https://example.net/fixture', 'text': 'This fictional fixture describes synthetic objects moving inside a bounded test.'}]
+    verdict = {'topic_assessment': {'suitable': True, 'reason': 'Synthetic fixture only'},
+               'source_assessments': [{'source_index': i, 'usable': True, 'reason': 'Synthetic fixture only'} for i in range(2)],
+               'answer': sources[0]['text'], 'answer_quote_ids': ['S0Q0', 'S1Q0'], 'supported': True,
+               'observable_quote_ids': ['S0Q0'], 'mechanism_quote_ids': ['S1Q0'], 'issues': []}
+    failure = {'validation': 'schema_invalid', 'violations': [{'path': ['answer'], 'rule': 'maxLength', 'required': 500, 'characters': 501}]}
+    return sources, verdict, failure
+
+
+def test_source_contract_retry_is_bounded_specific_and_still_requires_independent_gate(monkeypatch):
+    from curiosity import evidence
+    sources, verdict, failure = source_contract_fixture(); saved = deepcopy(sources)
+    calls = []; independent = []
+    def ask(model, system, prompt, schema, endpoint, seed, **kwargs):
+        calls.append(deepcopy(prompt))
+        assert schema['properties']['answer']['maxLength'] == 500
+        assert schema['properties']['source_assessments']['items']['properties']['reason']['maxLength'] == 200
+        if len(calls) == 1: raise remote_ai.ModelOutputInvalid(failure)
+        return deepcopy(verdict), {'synthetic': True}
+    def score(pairs): independent.extend(pairs); return {'accepted': False, 'pairs': []}
+    monkeypatch.setattr(storyboard, 'ask', ask)
+    monkeypatch.setattr(entailment, 'score_pairs', score)
+    accepted, audit = evidence.screen('Why do synthetic objects move?', sources, 'synthetic')
+    assert len(calls) == 2 and not accepted and independent
+    assert calls[1]['revision_feedback']['previous_contract_failure']['violations'][0]['characters'] == 501
+    assert audit['assessment_attempts'][0]['contract_accepted'] is False
+    assert audit['assessment_attempts'][1]['contract_accepted'] is True
+    assert audit['approved_source_indices'] == [] and sources == saved
+
+
+def test_two_invalid_source_contract_attempts_do_not_reach_science_or_draft(monkeypatch):
+    from curiosity import evidence
+    sources, verdict, failure = source_contract_fixture(); calls = []
+    def reject(*args, **kwargs): calls.append(1); raise remote_ai.ModelOutputInvalid(failure)
+    def forbidden(*args): raise AssertionError('Invalid source assessment reached independent science inference')
+    monkeypatch.setattr(storyboard, 'ask', reject)
+    monkeypatch.setattr(entailment, 'score_pairs', forbidden)
+    with pytest.raises(remote_ai.ModelOutputInvalid) as found:
+        evidence.screen('Why do synthetic objects move?', sources, 'synthetic')
+    assert len(calls) == 2 and len(found.value.metadata['source_assessment_attempts']) == 2
+
+
+def test_source_contract_failure_preserves_actual_retrieval_provenance(monkeypatch):
+    from curiosity import autonomy, evidence
+    sources, verdict, failure = source_contract_fixture()
+    candidates = [{'question': 'Synthetic fixture question?', 'search_terms': 'synthetic fixture'}]
+    research = {'retrieval_attempts': [{'requested_url': 'https://example.org/fixture', 'status': 'retrieved'}]}
+    monkeypatch.setattr(autonomy, 'questions', lambda *a, **k: (candidates, {}))
+    monkeypatch.setattr(autonomy, 'research', lambda *a, **k: (sources, deepcopy(research)))
+    def reject(*args, **kwargs): raise remote_ai.ModelOutputInvalid(failure)
+    monkeypatch.setattr(evidence, 'screen', reject)
+    with pytest.raises(autonomy.ResearchUnavailable) as found:
+        autonomy.select_and_research('synthetic', [])
+    audit = found.value.diagnostics['rejections'][0]
+    assert audit['status'] == 'source_assessment_contract_invalid'
+    assert audit['details']['research'] == research
+    assert audit['details']['model_contract']['violations'][0]['path'] == ['answer']
+
+
+def test_contract_diagnostics_are_bounded_and_do_not_copy_generated_values():
+    schema = {'type': 'object', 'properties': {f'field{i}': {'type': 'string', 'maxLength': 1} for i in range(15)}}
+    obj = {f'field{i}': 'synthetic generated prose' for i in range(15)}
+    report = storyboard.schema_failures(obj, schema)
+    assert len(report['violations']) == 12 and report['more_violations']
+    assert 'synthetic generated prose' not in json.dumps(report)
+    feedback = storyboard.revision_feedback({'validation': 'schema_invalid', **report, 'unrelated_raw_value': 'not allowed'})
+    assert 'not allowed' not in json.dumps(feedback)
+
+
+def test_valid_negative_source_verdict_is_not_retried_into_approval(monkeypatch):
+    from curiosity import evidence
+    sources, verdict, failure = source_contract_fixture(); verdict['supported'] = False; calls = []
+    def ask(*args, **kwargs): calls.append(1); return deepcopy(verdict), {'synthetic': True}
+    def forbidden(*args): raise AssertionError('Negative source verdict reached independent inference')
+    monkeypatch.setattr(storyboard, 'ask', ask)
+    monkeypatch.setattr(entailment, 'score_pairs', forbidden)
+    accepted, audit = evidence.screen('Why do synthetic objects move?', sources, 'synthetic')
+    assert len(calls) == 1 and not accepted and audit['approved_source_indices'] == []
