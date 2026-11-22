@@ -1,7 +1,7 @@
 {
   "video_count": 1,
   "max_videos_per_run": 20,
-  "draft_model": "qwen3:4b",
+  "draft_model": "qwen3:4b-instruct",
   "voice_default": "kokoro",
   "channel_id": "UCEawmiljBdHvnTScqnpPftw",
   "publication_default": "private",
