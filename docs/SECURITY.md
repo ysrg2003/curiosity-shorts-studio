@@ -12,3 +12,8 @@
 ## Test levels
 
 Unit tests mock YouTube. Rendering tests check streams, duration, aspect ratio, loudness and clipping. A contact sheet is an aid, not a replacement for watching the full video. Listen for pronunciations and inspect diagram/word alignment before public publication.
+
+
+## Unverified upload privacy
+
+A public-repository publication run keeps only a non-identifying reserved/uncertain state until the API read-back confirms both the expected channel and public privacy. Unverified video IDs and channel fields are not committed to its ledger. Only a verified public receipt is printed. Unexpected publication errors use a fixed safe message rather than a raw API traceback or URL. A private repository may retain an unverified video ID for owner reconciliation. This is a generic safeguard, not a claim that unverified Google projects are forced to private uploads. Nothing here deletes an uploaded video automatically or removes old repository history.
