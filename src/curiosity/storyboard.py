@@ -7,7 +7,30 @@ from urllib.request import Request,urlopen
 def normalized(text):return re.sub(r'\s+',' ',str(text)).strip().casefold()
 
 
-def source_pack(topic,sources,budget=9500):
+def passage_windows(text,width=1800,limit=40):
+    """Bounded contiguous sentence windows, preserving complete original offsets."""
+    import pysbd
+    spans=pysbd.Segmenter(language='en',clean=False,char_span=True).segment(text)
+    windows=[]
+    for index,span in enumerate(spans):
+        if windows and span.start-windows[-1][0]<width//2:continue
+        end=span.end
+        for following in spans[index+1:]:
+            if following.end-span.start>width:break
+            end=following.end
+        if end-span.start<=width:windows.append((span.start,end))
+        if len(windows)>=limit:break
+    return windows
+
+
+def passage_rank(question,text,title=''):
+    from .entailment import relevance_scores
+    windows=passage_windows(text)
+    scores=relevance_scores(question,[(title+'. '+text[a:b])[:7500] for a,b in windows])
+    return max(scores) if scores else -100.0
+
+
+def source_pack(topic,sources,budget=9500,semantic=False):
     import pysbd
     segmenter=pysbd.Segmenter(language='en',clean=False,char_span=True)
     terms={w for w in re.findall(r'[a-z]{4,}',topic.lower()) if w not in {'does','what','when','where','about','that','this','have','with','from','happen'}}
@@ -28,7 +51,16 @@ def source_pack(topic,sources,budget=9500):
                     if best is None or candidate>best:best=candidate
             return best
         best=window(each);opening=''
-        if best and best[3]>0:
+        if semantic and len(text)>each:
+            from .entailment import relevance_scores
+            origin=text[:600];width=each-len(origin)
+            candidates=passage_windows(text,width)
+            weights=relevance_scores(topic,[(source.get('title','')+'. '+text[a:b])[:7500] for a,b in candidates])
+            if weights:
+                a,b=candidates[max(range(len(weights)),key=weights.__getitem__)]
+                best=(0,b-a,-a,a,b)
+                if a>0:opening=origin
+        if best and best[3]>0 and not semantic:
             # Preserve origin cues such as author/date/history without splicing
             # them into the evidence passage or expanding the source budget.
             opening=text[:600]
@@ -38,6 +70,7 @@ def source_pack(topic,sources,budget=9500):
         for key in ('source_scope','publication_year','retrieval_url','pmid'):
             if key in source:entry[key]=source[key]
         if opening:entry['document_opening']=opening
+        elif source.get('document_opening'):entry['document_opening']=source['document_opening']
         packed.append(entry)
     return packed
 
