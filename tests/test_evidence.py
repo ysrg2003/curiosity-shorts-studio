@@ -171,7 +171,7 @@ def test_scope_retry_reuses_only_original_sources_not_generated_answer(monkeypat
     calls=[]
     def once(question,records,*args):
         calls.append(deepcopy(records))
-        if len(calls)==1:return False,{'independent_entailment':{'qualification_audit':{'complete_answer':False,'qualifiers_preserved':False,'no_exclusive_or_universal_overclaim':False}},'verdict':{'answer':'Untrusted unsupported fictional prose.'}}
+        if len(calls)==1:return False,{'independent_entailment':{'qualification_audit':{'complete_answer':False,'qualifiers_preserved':False,'no_exclusive_or_universal_overclaim':False,'grounding':{'accepted':True},'findings':[{'problem':'missing_condition','explanation':'Synthetic condition applies only to this fixture.','quote_ids':['S0Q0']}]}},'verdict':{'answer':'Untrusted unsupported fictional prose.'}}
         return True,{'accepted':True}
     monkeypatch.setattr(evidence,'screen_once',once)
     original=sources();accepted,audit=evidence.screen('Synthetic?',original,'synthetic')
@@ -179,3 +179,30 @@ def test_scope_retry_reuses_only_original_sources_not_generated_answer(monkeypat
     assert all('scope_audit_feedback' in source for source in calls[1])
     assert all(source['text']==original[i]['text'] and 'answer' not in source for i,source in enumerate(calls[1]))
     assert audit['fresh_scope_assessments']==2 and 'scope_audit_feedback' not in original[0]
+
+
+def test_unexplained_scope_rejection_cannot_trigger_blind_retry(monkeypatch):
+    calls=[]
+    def once(*args):
+        calls.append(args);return False,{'independent_entailment':{'qualification_audit':{'complete_answer':False,'qualifiers_preserved':False,'no_exclusive_or_universal_overclaim':False,'findings':[]}}}
+    monkeypatch.setattr(evidence,'screen_once',once)
+    accepted,report=evidence.screen('Synthetic?',sources(),'synthetic')
+    assert not accepted and len(calls)==1 and 'scope_retry_skipped' in report
+
+
+def test_scope_audit_findings_require_original_ids_and_consistent_decision():
+    entries=evidence.catalog(sources());key=next(iter(entries))
+    audit={'findings':[],'complete_answer':False,'qualifiers_preserved':False,'no_exclusive_or_universal_overclaim':False,'issues':['answer_not_supported']}
+    assert not evidence.validate_scope_findings(audit,entries)['accepted']
+    audit['findings']=[{'problem':'missing_condition','explanation':'The synthetic fixture applies only under a stated condition.','quote_ids':[key]}]
+    assert evidence.validate_scope_findings(audit,entries)['accepted']
+    audit['findings'][0]['quote_ids']=['invented']
+    assert not evidence.validate_scope_findings(audit,entries)['accepted']
+
+
+def test_scope_plan_requires_original_source_citations():
+    entries=evidence.catalog(sources());key=next(iter(entries))
+    plan=[{'condition_or_alternative':'Only under the synthetic fixture conditions.','quote_ids':[key]}]
+    assert evidence.validate_scope_plan(plan,entries)['accepted']
+    plan[0]['quote_ids']=[]
+    assert not evidence.validate_scope_plan(plan,entries)['accepted']
