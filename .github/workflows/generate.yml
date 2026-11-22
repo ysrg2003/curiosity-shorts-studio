@@ -74,6 +74,10 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg espeak-ng zstd
           python -m pip install -e '.[test,local-voice]'
+          if [ "$MODE" = new-topic ]; then
+            sudo apt-get install -y libcairo2-dev libpango1.0-dev pkg-config
+            python -m pip install -e '.[motion]'
+          fi
       - name: Unit and safety checks
         run: python -m pytest -q
       - name: Start local drafting model, new-topic mode only
