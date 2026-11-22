@@ -13,11 +13,43 @@ Do not change config or camera geometry. Use dark navy background already config
 All shapes/text must remain inside x=-3.7to3.7 and y=-3.8to5.8.
 Below y=-4 is reserved for separately added captions. Keep that region empty.
 No extra title, captions, faces or paragraphs. The spoken narration and caption layer handle words.
-At most3short labels, font_size28to36, each1to3words, fit with shrink-only helper.
+At most4short labels, font_size28to36, each at most36characters, fit with shrink-only helper.
+Never use to_edge or to_corner: the physical frame edges are outside the safe content region.
+Use explicit positions inside the stated safe region, and fit groups to at most7.4units wide.
+Use separate nonoverlapping positions for every label. Do not stack multiple labels on one anchor.
 Illustrate actual objects, spatial relationships and physical changes from the source.
 At least3visible animation changes. Do not replace the mechanism with generic cards or bullet lists.
 Use self.play run_time to fill the requested duration, short pauses, final composition stays visible.
 '''
+
+
+def portrait_system(system):
+    """Remove conflicting landscape instructions before code inference."""
+    import re
+    replaced, count = re.subn(r'=== SAFE AREA.*?=== END SAFE AREA ===', PORTRAIT, system, flags=re.S)
+    replaced, examples = re.subn(r'Worked example of a SAFE scene structure.*?Your output MUST follow this structure\.', '', replaced, flags=re.S)
+    if count != 1 or examples != 1 or 'max_w=11' in replaced:
+        raise ValueError('Pinned upstream portrait prompt contract could not be applied safely')
+    return replaced
+
+
+def portrait_lint(code):
+    import ast
+    try: tree = ast.parse(code)
+    except SyntaxError: return []  # The upstream syntax check owns this failure.
+    errors = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {'to_edge', 'to_corner'}:
+            errors.add('Physical frame edges include the reserved caption region. Use explicit positions inside x=-3.7to3.7 and y=-3.8to5.8, not to_edge/to_corner.')
+        if isinstance(node, ast.Call):
+            for keyword in node.keywords:
+                if keyword.arg == 'max_w' and isinstance(keyword.value, ast.Constant) and isinstance(keyword.value.value, (int, float)) and keyword.value.value > 7.4:
+                    errors.add('A fit width exceeds the7.4unit portrait safe width. Use a shrink-only fit within the content region.')
+        if isinstance(node, ast.FunctionDef) and node.name == 'fit':
+            for argument, value in zip(node.args.args[-len(node.args.defaults):], node.args.defaults):
+                if argument.arg == 'max_w' and isinstance(value, ast.Constant) and isinstance(value.value, (int, float)) and value.value > 7.4:
+                    errors.add('The fit helper still has a landscape width. Its max_w default must be at most7.4.')
+    return sorted(errors)
 
 
 def prepare(spec,timeline,bundle,model):
@@ -31,10 +63,10 @@ def prepare(spec,timeline,bundle,model):
     old_system,old_portrait,old_runner,old_lint=manim_r.CODEGEN_SYSTEM,manim_r.PORTRAIT_ADDENDUM,manim_r._run_manim,manim_r.lint_manim_code
     # Keep the existing upstream reliability rules; replace its landscape-only safe-area section.
     import re
-    manim_r.CODEGEN_SYSTEM=re.sub(r'=== SAFE AREA.*?=== END SAFE AREA ===',PORTRAIT,old_system,flags=re.S)
+    manim_r.CODEGEN_SYSTEM=portrait_system(old_system)
     manim_r.PORTRAIT_ADDENDUM=PORTRAIT
     manim_r._run_manim=adapter.isolated_manim
-    manim_r.lint_manim_code=lambda code,social_mode=False:old_lint(code,social_mode=social_mode)+adapter.extra_lint(code)
+    manim_r.lint_manim_code=lambda code,social_mode=False:old_lint(code,social_mode=social_mode)+adapter.extra_lint(code)+portrait_lint(code)
     records={}
     try:
         with scrubbed_subprocesses():
