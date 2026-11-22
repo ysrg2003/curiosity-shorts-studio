@@ -20,7 +20,7 @@
 ## مسار المواضيع الجديدة
 
 1. اختيار سؤال آلي أو قراءة سؤال المشغل.
-2. بحث محدود بالآلية والسؤال عبر Wikimedia، مع طلب مراجع كل صفحة منفصلة ومعالجة استمرارها ضمن حد ثابت. يجمع حتى 4 مجموعات نشر بدلا من التوقف عند أول رابطين. استرجاع HTTPS يرفض الشبكات الخاصة وصفحات الموقع الرئيسية وبديل HTML لرابط PDF. يدعم استخراج HTML وبعض ملفات PDF الصغيرة.
+2. بحث محدود بالآلية والسؤال عبر Wikimedia، مع طلب HTML المراجع مرة واحدة لكل صفحة وترتيب الروابط بسياق الاقتباس والآلية، لا بترتيب URL أو شهرة الناشر. يجمع حتى 4 مجموعات نشر بدلا من التوقف عند أول رابطين. استرجاع HTTPS يرفض الشبكات الخاصة وصفحات الموقع الرئيسية وبديل HTML لرابط PDF. يدعم استخراج HTML وبعض ملفات PDF الصغيرة.
 3. قبول آلي صريح لمناسبة الموضوع لفيديو علمي قصير غير طبي، واشتراط مجموعتي نشر مقروءتين في الوضع الآلي، ثم فحص دعم السؤال نفسه والملاحظة والآلية. لا يكفي تشابه الكلمات. عند الرفض يجرب مرشحا آخر من القائمة المحدودة، ولا يخترع دليلا. هذا فحص بالنموذج، وليس إثباتا للصحة أو الإجماع. اسم الجامعة لا يكفي، ولا ينبغي عرض نص تاريخي أو نظرية قديمة كتفسير علمي حالي. يفحص كل سجل ثم يختار مجموعة صالحة، ولا يرسل السجلات المستبعدة إلى كاتب الحوار. يتحقق البرنامج من اكتمال فحص السجلات ومن عدم اختيار اقتباس من سجل مستبعد. تحفظ بداية الوثيقة منفصلة كسياق للمصدر، ضمن حد الحجم نفسه ودون دمجها في الاقتباس.
 4. يستخدم pySBD لتحديد جمل أصلية كاملة داخل مقتطفات متصلة، ويختار النموذج معرفات هذه الجمل بدلا من إعادة كتابة الاقتباس. يربط البرنامج المعرف بالنص الحرفي دون اختراع أو إصلاح للدليل. تُفحص مواصفة التوليد قبل طلب الحوار: 13 خانة متناوبة تبدأ وتنتهي مع Pip، منها ثلاثة مشاهد شرح محددة مسبقا. قيود الكلمات داخل كل خانة تستهدف 176 إلى 228 كلمة. هذا تنظيم عام للحوار، وليس موضوعا أو نصا أو رسما محضرا. لا يضيف البرنامج كلمات ولا يعيد تعيين المشاهد لإصلاح خرج مخالف. تبقى فحوص الطول والأدلة كما هي، وقراءة ثانية بالنموذج تشترط أيضا حوارا إنجليزيا مترابطا وتبحث عن الادعاءات والآليات المرئية غير المدعومة. ترفض الموافقة على الأرقام العشوائية والنص غير المفهوم والحشو والتكرار، ولا يكفي اجتياز عدد الكلمات. عند إدخال روابط مصادر يدويا يُطلب فحص مناسبة الموضوع والمصادر قبل كتابة الحوار أيضا. يُفحص عقد ملف الحلقة قبل تسجيل قبول المسودة وبدء الصوت. الإخفاق يوقف المرحلة، ولا يعني قبول النموذج اعتمادا علميا بشريا.
 5. توليد الصوت وتوقيت الكلمات في عملية لا ترث مفتاح النموذج أو صلاحية كتابة المستودع.
@@ -103,3 +103,17 @@ Native inference constrains JSON structure, not prose lengths or word boundaries
 Source audit reasons and remaining issues are closed reason codes, not free-form paragraphs with arbitrary audit-prose limits. Decision flags must agree with those codes. A negative source verdict may have an empty answer; a positive decision still needs a complete source-supported answer, original evidence IDs, two usable source groups and independent entailment before drafting. Spoken-word, narration-length, evidence and story gates are unchanged. Sentence candidates without ending punctuation are rejected rather than offered as complete evidence.
 
 Both the mechanism and exact-question discovery pools are requested before article retrieval. Reference candidates are interleaved across discovered pages within the same global10article-attempt and per-page6attempt limits. The mechanism pool supplies the first usable encyclopedia introduction, rather than letting unrelated full-question results consume the whole budget. Discovery is not scientific approval. Rejected draft contracts can retain a separately labeled untrusted diagnostic response for inspection; it is never an accepted episode or a repaired script.
+
+
+## Public-source transport safeguards
+
+The public research bot uses one stable User-Agent with this repository as its contact URL, serial Wikimedia requests at least 7 seconds apart, and a bounded in-process response cache. It requests `maxlag=5`. HTTP status, numeric Retry-After and typed API errors are retained without server error bodies. HTTP 401/403/429/503 stops further requests to the affected provider for that process. A Wikimedia provider stop ends automatic selection, rather than continuing across other proposed topics. There is no identity rotation, browser impersonation or automatic retry after a provider stop.
+
+Discovery reads rendered citation HTML once per page and ranks eligible article links using the question, mechanism and citation context. Search/query hubs are excluded. The unchanged article-attempt limits are 10 overall and 6 per discovered page. Context ranking and publisher diversity are retrieval aids, never scientific acceptance. Complete source answers, original evidence, independent entailment, narration and story gates still run before media. This transport change has unit coverage, but does not itself prove live retrieval, a successful script or video quality.
+
+Primary API policies and reference:
+- https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy/en
+- https://www.mediawiki.org/wiki/Wikimedia_APIs/Rate_limits
+- https://www.mediawiki.org/wiki/API:Etiquette
+- https://www.mediawiki.org/wiki/Manual:Maxlag_parameter
+- https://www.mediawiki.org/wiki/API:Parsing_wikitext
