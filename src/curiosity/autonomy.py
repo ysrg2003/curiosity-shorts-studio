@@ -50,32 +50,67 @@ class ResearchUnavailable(ValueError):
         super().__init__(message);self.diagnostics=diagnostics
 
 
-def research(question,terms):
-    params=urlencode({'action':'query','generator':'search','gsrsearch':terms,'gsrlimit':2,'prop':'extracts|info|extlinks','explaintext':1,'exintro':1,'inprop':'url','ellimit':50,'format':'json'})
+def wiki_pages(query):
+    params=urlencode({'action':'query','generator':'search','gsrsearch':query,'gsrlimit':3,'prop':'extracts|info','explaintext':1,'exintro':1,'inprop':'url','format':'json'})
     data=fetch('https://en.wikipedia.org/w/api.php?'+params)
-    pages=sorted(data.get('query',{}).get('pages',{}).values(),key=lambda p:p.get('index',999))
-    sources=[];groups=set();attempted=[]
-    for page in pages:
-        if len(page.get('extract',''))>=450 and 'wikipedia.org' not in groups:
-            sources.append({'url':public_url(page['fullurl']),'title':page.get('title',''),'text':page['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API'})
-            groups.add('wikipedia.org')
-        for item in page.get('extlinks',[]):
-            url=item.get('*',item.get('url',''))
-            # A documented HTTP reference may support HTTPS. Only fetch the verified HTTPS endpoint.
-            if url.startswith('http://'):url='https://'+url[7:]
-            if len(attempted)>=6:break
-            if not eligible_reference(url) or publisher(url) in groups:continue
-            record={'requested_url':url};attempted.append(record)
-            try:
-                source=article(url)
-                group=publisher(source['url'])
-                if not eligible_reference(source['url']) or group in groups:
-                    record['status']='ineligible_or_duplicate_resolved_publisher';continue
-                sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'])
-            except Exception as error:
-                record.update(status='unreadable',error_type=type(error).__name__);continue
-            if len(groups)>=2:return sources,{'question':question,'query':terms,'publishers':sorted(groups),'retrieval_attempts':attempted,'not_a_truth_guarantee':True}
-    raise ResearchUnavailable('No two readable publisher groups from live research. No unsupported fallback or video.',{'question':question,'query':terms,'publishers':sorted(groups),'retrieval_attempts':attempted})
+    return sorted(data.get('query',{}).get('pages',{}).values(),key=lambda page:page.get('index',999))
+
+
+def wiki_links(page_id):
+    links=[];continuation={}
+    for _ in range(2):
+        params={'action':'query','pageids':str(page_id),'prop':'extlinks','ellimit':100,'format':'json',**continuation}
+        data=fetch('https://en.wikipedia.org/w/api.php?'+urlencode(params))
+        for page in data.get('query',{}).get('pages',{}).values():links.extend(page.get('extlinks',[]))
+        following=data.get('continue',{})
+        if 'elcontinue' not in following:break
+        continuation={key:following[key] for key in ('continue','elcontinue') if key in following}
+    return links
+
+
+def document_resolution(requested,final,is_pdf):
+    if urlparse(requested).path.lower().endswith('.pdf') and not is_pdf:raise ValueError('PDF reference resolved to a non-PDF page')
+    if not is_pdf and urlparse(final).path.rstrip('/')=='':raise ValueError('Reference resolved to a generic website root, not an article')
+
+
+def research(question,terms):
+    sources=[];groups=set();attempted=[];discovery=[];seen_pages=set();seen_urls=set()
+    def report():return {'question':question,'queries':list(dict.fromkeys([terms,question])),'publishers':sorted(groups),'discovery':discovery,'retrieval_attempts':attempted,'not_a_truth_guarantee':True}
+    for query in dict.fromkeys([terms,question]):
+        if len(attempted)>=10:break
+        try:pages=wiki_pages(query)
+        except (ValueError,OSError) as error:
+            discovery.append({'query':query,'status':'unavailable','error_type':type(error).__name__});continue
+        discovery.append({'query':query,'status':'retrieved','page_titles':[page.get('title','') for page in pages]})
+        for page in pages:
+            page_id=page.get('pageid')
+            if page_id is None or page_id in seen_pages:continue
+            seen_pages.add(page_id)
+            if len(page.get('extract',''))>=450 and 'wikipedia.org' not in groups:
+                sources.append({'url':public_url(page['fullurl']),'title':page.get('title',''),'text':page['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API'})
+                groups.add('wikipedia.org')
+            if len(attempted)>=10:break
+            try:links=wiki_links(page_id)
+            except (ValueError,OSError) as error:
+                discovery.append({'page_id':page_id,'status':'references_unavailable','error_type':type(error).__name__});continue
+            page_attempts=0
+            for item in links:
+                url=item.get('*',item.get('url',''))
+                if url.startswith('http://'):url='https://'+url[7:]
+                if len(attempted)>=10 or page_attempts>=6:break
+                if not eligible_reference(url) or publisher(url) in groups or url in seen_urls:continue
+                seen_urls.add(url);page_attempts+=1
+                record={'requested_url':url};attempted.append(record)
+                try:
+                    source=article(url);group=publisher(source['url'])
+                    if not eligible_reference(source['url']) or group in groups:
+                        record['status']='ineligible_or_duplicate_resolved_publisher';continue
+                    sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'])
+                except Exception as error:
+                    record.update(status='unreadable',error_type=type(error).__name__);continue
+                if len(groups)>=4:return sources,report()
+    if len(groups)>=2:return sources,report()
+    raise ResearchUnavailable('No two readable publisher groups from live research. No unsupported fallback or video.',report())
 
 
 def article(url):
@@ -87,6 +122,7 @@ def article(url):
     with build_opener(PublicRedirects()).open(Request(url,headers={'User-Agent':USER_AGENT}),timeout=25) as response:
         final=public_url(response.url);raw=response.read(2_000_001)
         if len(raw)>2_000_000:raise ValueError('Source exceeds2MB')
+    document_resolution(url,final,raw.startswith(b'%PDF'))
     if raw.startswith(b'%PDF'):
         from io import BytesIO
         from pypdf import PdfReader
