@@ -125,10 +125,13 @@ def test_real_endpoint_probe_checks_complete_output_not_just_request_success(mon
               'done': True, 'done_reason': 'length' if mode == 'length' else 'stop', 'eval_count': 80}
     def open_request(request, timeout):
         payload = json.loads(request.data)
-        assert payload['think'] is False and payload['options']['num_predict'] == 512
+        assert payload['think'] is False and payload['options']['num_predict'] == 1024
         assert 'exactly one word' in payload['prompt']
         assert set(payload['format']['properties']) == {'pip', 'ray'}
         assert payload['format']['additionalProperties'] is False
         return io.StringIO(json.dumps(result))
     monkeypatch.setattr(slots, 'urlopen', open_request)
-    assert slots.probe()['accepted'] is accepted
+    checked = slots.probe()
+    assert checked['accepted'] is accepted
+    assert checked['synthetic_response_sample'] == json.dumps(obj)
+    assert checked['done_reason'] == result['done_reason']
