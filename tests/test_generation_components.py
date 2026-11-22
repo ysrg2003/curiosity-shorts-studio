@@ -282,7 +282,7 @@ def test_quota_read_never_infers_or_exposes_key_labels_counts_or_account_details
         return SimpleNamespace(status_code=200,json=lambda:{'data':{'label':'synthetic-private-label','organization_id':'synthetic-private-org','free_model_daily_requests':counter,'usage_daily':91.23}})
     monkeypatch.setattr(requests,'get',get)
     result=remote_ai.free_quota_status()
-    assert result=={'http_status':200,'daily_counter':'at_limit','inference_performed':False}
+    assert result=={'http_status':200,'daily_counter':'at_limit','count1_budget':'below_conservative_reserve','inference_performed':False}
     counter['remaining']=12
     assert remote_ai.free_quota_status()['daily_counter']=='has_remaining'
     counter['remaining']=True
@@ -297,5 +297,28 @@ def test_quota_read_failure_is_sanitized_and_never_retried(monkeypatch):
     def fail(*a,**k):
         calls.append(True);raise RuntimeError('synthetic-private-sensitive-error')
     monkeypatch.setattr(requests,'get',fail)
-    assert remote_ai.free_quota_status()=={'http_status':'unavailable','daily_counter':'unknown','inference_performed':False}
+    assert remote_ai.free_quota_status()=={'http_status':'unavailable','daily_counter':'unknown','count1_budget':'unknown','inference_performed':False}
     assert len(calls)==1
+
+
+def test_safe_rate_limit_metadata_never_retains_raw_header_or_provider_text(monkeypatch):
+    adapter=pytest.importorskip('ai_router.providers.openai_compatible')
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-private-secret')
+    monkeypatch.setattr(remote_ai,'check_free_catalog',lambda:{remote_ai.MODEL})
+    headers={'Retry-After':'60','X-RateLimit-Reset':'1795430000000','X-Private':'synthetic-private-text'}
+    monkeypatch.setattr(adapter.requests,'post',lambda *a,**k:SimpleNamespace(status_code=429,headers=headers,json=lambda:{'error':{'message':'synthetic-private-text','metadata':{'provider_code':'synthetic-private-text'}}}))
+    with pytest.raises(remote_ai.ModelRequestFailed) as found:remote_ai.request('synthetic','synthetic')
+    assert found.value.metadata['retry_after_seconds']==60 and found.value.metadata['rate_reset_unix_ms']==1795430000000 and found.value.metadata['provider_code_present']
+    assert 'synthetic-private' not in str(found.value.metadata)
+    headers['Retry-After']='synthetic-private-text'
+    with pytest.raises(remote_ai.ModelRequestFailed) as found:remote_ai.request('synthetic','synthetic')
+    assert 'retry_after_seconds' not in found.value.metadata
+
+def test_quota_reserve_covers_connection_and_bounded_count1_calls(monkeypatch):
+    import requests
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-private-secret')
+    remaining=[23]
+    monkeypatch.setattr(requests,'get',lambda *a,**k:SimpleNamespace(status_code=200,json=lambda:{'data':{'free_model_daily_requests':{'remaining':remaining[0]}}}))
+    assert remote_ai.free_quota_status()['count1_budget']=='below_conservative_reserve'
+    remaining[0]=24
+    assert remote_ai.free_quota_status()['count1_budget']=='sufficient_for_bounded_attempt'
