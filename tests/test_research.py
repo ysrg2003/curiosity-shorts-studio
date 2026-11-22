@@ -54,11 +54,11 @@ def test_failed_reference_retrieval_is_bounded_across_both_queries(monkeypatch):
     def article(url):reads.append(url);raise OSError('synthetic unavailable reference')
     monkeypatch.setattr(autonomy,'article',article)
     with pytest.raises(autonomy.ResearchUnavailable) as error:autonomy.research('Synthetic question?','synthetic mechanism')
-    assert len(reads)==10 and searches==['synthetic mechanism']
+    assert len(reads)==10 and searches==['Synthetic question?']
     assert len(error.value.diagnostics['retrieval_attempts'])==10
 
 
-def test_backup_question_query_is_used_when_reference_budget_remains(monkeypatch):
+def test_backup_mechanism_query_is_used_when_reference_budget_remains(monkeypatch):
     searches=[]
     monkeypatch.setattr(autonomy,'public_url',lambda url:url)
     def pages(query):searches.append(query);return [] if len(searches)==1 else [page()]
@@ -66,4 +66,4 @@ def test_backup_question_query_is_used_when_reference_budget_remains(monkeypatch
     monkeypatch.setattr(autonomy,'wiki_links',lambda index:[{'*':'https://example.edu/article'}])
     monkeypatch.setattr(autonomy,'article',lambda url:{'url':url,'text':'Synthetic evidence. '*50})
     sources,audit=autonomy.research('Synthetic question?','synthetic mechanism')
-    assert len(sources)==2 and searches==['synthetic mechanism','Synthetic question?']
+    assert len(sources)==2 and searches==['Synthetic question?','synthetic mechanism']
