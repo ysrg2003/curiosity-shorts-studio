@@ -20,7 +20,7 @@
 ## مسار المواضيع الجديدة
 
 1. اختيار سؤال آلي أو قراءة سؤال المشغل.
-2. بحث محدود بالآلية والسؤال عبر Wikimedia، مع طلب HTML المراجع مرة واحدة لكل صفحة وترتيب الروابط بسياق الاقتباس والآلية، لا بترتيب URL أو شهرة الناشر. يجمع حتى 4 مجموعات نشر بدلا من التوقف عند أول رابطين. استرجاع HTTPS يرفض الشبكات الخاصة وصفحات الموقع الرئيسية وبديل HTML لرابط PDF. يدعم استخراج HTML وبعض ملفات PDF الصغيرة.
+2. بحث محدود بالآلية والسؤال عبر Wikimedia، مع طلب HTML المراجع مرة واحدة لكل صفحة وترتيب الروابط بسياق الاقتباس والآلية، لا بترتيب URL أو شهرة الناشر. يفحص مجموعة المرشحين ضمن حد القراءة، ثم يرتب الوثائق ويختار حتى 4 مجموعات نشر، دون اعتبار الترتيب إثباتا علميا. استرجاع HTTPS يرفض الشبكات الخاصة وصفحات الموقع الرئيسية وبديل HTML لرابط PDF. يدعم استخراج HTML وبعض ملفات PDF الصغيرة.
 3. قبول آلي صريح لمناسبة الموضوع لفيديو علمي قصير غير طبي، واشتراط مجموعتي نشر مقروءتين في الوضع الآلي، ثم فحص دعم السؤال نفسه والملاحظة والآلية. لا يكفي تشابه الكلمات. عند الرفض يجرب مرشحا آخر من القائمة المحدودة، ولا يخترع دليلا. هذا فحص بالنموذج، وليس إثباتا للصحة أو الإجماع. اسم الجامعة لا يكفي، ولا ينبغي عرض نص تاريخي أو نظرية قديمة كتفسير علمي حالي. يفحص كل سجل ثم يختار مجموعة صالحة، ولا يرسل السجلات المستبعدة إلى كاتب الحوار. يتحقق البرنامج من اكتمال فحص السجلات ومن عدم اختيار اقتباس من سجل مستبعد. تحفظ بداية الوثيقة منفصلة كسياق للمصدر، ضمن حد الحجم نفسه ودون دمجها في الاقتباس.
 4. يستخدم pySBD لتحديد جمل أصلية كاملة داخل مقتطفات متصلة، ويختار النموذج معرفات هذه الجمل بدلا من إعادة كتابة الاقتباس. يربط البرنامج المعرف بالنص الحرفي دون اختراع أو إصلاح للدليل. تُفحص مواصفة التوليد قبل طلب الحوار: 13 خانة متناوبة تبدأ وتنتهي مع Pip، منها ثلاثة مشاهد شرح محددة مسبقا. قيود الكلمات داخل كل خانة تستهدف 176 إلى 228 كلمة. هذا تنظيم عام للحوار، وليس موضوعا أو نصا أو رسما محضرا. لا يضيف البرنامج كلمات ولا يعيد تعيين المشاهد لإصلاح خرج مخالف. تبقى فحوص الطول والأدلة كما هي، وقراءة ثانية بالنموذج تشترط أيضا حوارا إنجليزيا مترابطا وتبحث عن الادعاءات والآليات المرئية غير المدعومة. ترفض الموافقة على الأرقام العشوائية والنص غير المفهوم والحشو والتكرار، ولا يكفي اجتياز عدد الكلمات. عند إدخال روابط مصادر يدويا يُطلب فحص مناسبة الموضوع والمصادر قبل كتابة الحوار أيضا. يُفحص عقد ملف الحلقة قبل تسجيل قبول المسودة وبدء الصوت. الإخفاق يوقف المرحلة، ولا يعني قبول النموذج اعتمادا علميا بشريا.
 5. توليد الصوت وتوقيت الكلمات في عملية لا ترث مفتاح النموذج أو صلاحية كتابة المستودع.
@@ -109,7 +109,7 @@ Both the mechanism and exact-question discovery pools are requested before artic
 
 The public research bot uses one stable User-Agent with this repository as its contact URL, serial Wikimedia requests at least 7 seconds apart, and a bounded in-process response cache. It requests `maxlag=5`. HTTP status, numeric Retry-After and typed API errors are retained without server error bodies. HTTP 401/403/429/503 stops further requests to the affected provider for that process. A Wikimedia provider stop ends automatic selection, rather than continuing across other proposed topics. There is no identity rotation, browser impersonation or automatic retry after a provider stop.
 
-Discovery reads rendered citation HTML once per page and ranks eligible article links using the question, mechanism and citation context. Search/query hubs are excluded. The unchanged article-attempt limits are 10 overall and 6 per discovered page. Context ranking and publisher diversity are retrieval aids, never scientific acceptance. Complete source answers, original evidence, independent entailment, narration and story gates still run before media. This transport change has unit coverage, but does not itself prove live retrieval, a successful script or video quality.
+Discovery reads rendered citation HTML once per page and ranks eligible article links using the question, mechanism and citation context. Search/query hubs are excluded. The unchanged article-attempt limits are 10 overall and 6 per discovered page. Context ranking and publisher diversity are retrieval aids, never scientific acceptance. Complete source answers, original evidence, independent entailment, narration and story gates still run before media. The transport reached source assessment in an actual GitHub Actions experiment, but no new script or video was accepted. Retrieval success is not scientific or video approval.
 
 Primary API policies and reference:
 - https://foundation.wikimedia.org/wiki/Policy:Wikimedia_Foundation_User-Agent_Policy/en
@@ -117,3 +117,15 @@ Primary API policies and reference:
 - https://www.mediawiki.org/wiki/API:Etiquette
 - https://www.mediawiki.org/wiki/Manual:Maxlag_parameter
 - https://www.mediawiki.org/wiki/API:Parsing_wikitext
+
+
+## Subject-first discovery and publication scope
+
+The automatic proposer supplies a short `subject_query` as a search hypothesis, separately from the proposed mechanism. Subject, mechanism and exact-question discovery happen before reference reads. The subject phrase must overlap meaningful question vocabulary, but that is only a query-contract check. It does not validate the proposed mechanism or scientific answer. No operator-prepared topics or source URLs are injected into automatic mode.
+
+The same 10 overall / 6 per-page article-attempt budget is collected before document selection. A first readable paper no longer suppresses later references from the same publisher. Question/subject overlap ranks the read documents, then up to four publisher groups reach the existing topic/source assessment. Ranking is not a usable-source verdict and cannot skip the later evidence, NLI, narration or story gates.
+
+Numeric PubMed references use the documented Europe PMC publication-record API instead of relying on PubMed page chrome. Record ID, PMID and MED source must match. Only the returned abstract is used, with `abstract_only` scope, publication year and retrieval URL retained in the model source pack and research audit. It is not described as an inspected full paper. The existing 700-character text floor is unchanged, and metadata is never added to pad a short abstract. These records keep their original PubMed/NIH publisher group, so using an API mirror does not manufacture another independent source. Europe PMC reads are serial, conservatively spaced at least one second apart, and cached within the process.
+
+API reference: https://europepmc.org/RestfulWebService
+Search reference: https://www.mediawiki.org/wiki/Help:CirrusSearch
