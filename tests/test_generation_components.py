@@ -156,3 +156,15 @@ def test_automatic_batch_ignores_operator_topics_and_scrubs_both_workers(monkeyp
     assert [command[3] for command,_ in calls]==['audio','video']
     assert all('OPENROUTER_API_KEY' not in kwargs['env'] for _,kwargs in calls)
     assert json.loads((tmp_path/'output/generation.json').read_text())['operator_topic_or_source_input'] is False
+
+
+def test_provider_errors_keep_numeric_status_but_never_raw_messages(monkeypatch):
+    adapter=pytest.importorskip('ai_router.providers.openai_compatible')
+    from ai_router.providers.base import ProviderError
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-unit-test-only')
+    monkeypatch.setattr(remote_ai,'check_free_catalog',lambda:True)
+    def fail(*a,**k):raise ProviderError('synthetic-sensitive-response-must-not-leak',error_class='rate_limit',status_code=429)
+    monkeypatch.setattr(adapter.OpenAICompatibleAdapter,'complete_json',fail)
+    with pytest.raises(RuntimeError) as found:remote_ai.request('synthetic','synthetic')
+    assert '429' in str(found.value) and 'rate_limit' in str(found.value)
+    assert 'synthetic-sensitive' not in str(found.value) and 'synthetic-unit-test-only' not in str(found.value)
