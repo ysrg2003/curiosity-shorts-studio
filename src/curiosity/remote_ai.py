@@ -9,8 +9,9 @@ MODEL='particle-ai/particle-1:free'
 
 
 class ModelOutputInvalid(ValueError):
-    def __init__(self,metadata):
+    def __init__(self,metadata,model_output=None):
         self.metadata=metadata
+        self.model_output=model_output
         super().__init__('Model output was incomplete or failed local JSON/schema validation. '+json.dumps(metadata,sort_keys=True))
 
 
