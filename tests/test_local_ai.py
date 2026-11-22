@@ -11,7 +11,8 @@ def test_local_preflight_verifies_manifest_and_explicit_non_thinking_metadata(mo
         data={'models':[{'name':local_ai.MODEL,'digest':digest[0]}]} if isinstance(request,str) else {'thinking':{'values':values[0]},'capabilities':['completion']}
         return io.StringIO(json.dumps(data))
     monkeypatch.setattr(local_ai,'urlopen',read)
-    assert local_ai.verify()['non_thinking_only'] and len(requests)==2
+    monkeypatch.setattr(local_ai,'probe',lambda:{'accepted':True})
+    assert local_ai.verify()['reasoning_off_probe_passed'] and len(requests)==2
     digest[0]='changed-synthetic-manifest'
     with pytest.raises(ValueError,match='manifest'):local_ai.verify()
     digest[0]=local_ai.MANIFEST;values[0]=[True]
@@ -39,21 +40,24 @@ def test_default_config_and_workflow_pull_the_pinned_local_model():
     assert 'ollama pull '+local_ai.MODEL in workflow and 'python -m curiosity.local_ai' in workflow
 
 
-def test_only_the_pinned_instruct_model_can_use_legacy_metadata_absence(monkeypatch):
-    shown=[{'capabilities':['completion']}];digest=[local_ai.MANIFEST]
+def test_only_pinned_manifest_and_a_live_probe_can_cover_legacy_metadata_absence(monkeypatch):
+    shown=[{'capabilities':['completion','thinking']}];digest=[local_ai.MANIFEST];accepted=[True];calls=[]
     def read(request,**kwargs):
         data={'models':[{'name':local_ai.MODEL,'digest':digest[0]}]} if isinstance(request,str) else shown[0]
         return io.StringIO(json.dumps(data))
-    monkeypatch.setattr(local_ai,'urlopen',read)
-    assert local_ai.verify()['thinking_control_source']=='pinned_instruct_manifest_and_capabilities'
-    shown[0]={'capabilities':['completion','thinking']}
-    with pytest.raises(ValueError,match='capabilities'):local_ai.verify()
+    def probe():calls.append(True);return {'accepted':accepted[0]}
+    monkeypatch.setattr(local_ai,'urlopen',read);monkeypatch.setattr(local_ai,'probe',probe)
+    assert local_ai.verify()['reasoning_off_probe_passed'] and len(calls)==1
+    accepted[0]=False
+    with pytest.raises(ValueError,match='probe failed'):local_ai.verify()
+    assert len(calls)==2
     shown[0]={}
-    with pytest.raises(ValueError,match='capabilities'):local_ai.verify()
+    with pytest.raises(ValueError,match='capability'):local_ai.verify()
     shown[0]={'capabilities':['completion'],'thinking':{'values':[True]}}
     with pytest.raises(ValueError,match='metadata'):local_ai.verify()
     shown[0]={'capabilities':['completion']};digest[0]='different-instruct-tag-is-not-permission'
     with pytest.raises(ValueError,match='manifest'):local_ai.verify()
+    assert len(calls)==2
 
 
 def test_local_scene_adapter_also_rejects_unexpected_thinking(monkeypatch):
