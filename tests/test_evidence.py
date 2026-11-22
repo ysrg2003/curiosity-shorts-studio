@@ -33,8 +33,9 @@ def test_binding_never_invents_repairs_or_edits_a_source_quote():
 
 def test_draft_uses_existing_ids_and_fixed_odd_line_count_without_authored_words():
     entries=evidence.catalog(sources());schema=evidence.drafting_schema(entries)
-    lines=schema['properties']['lines'];assert lines['minItems']==lines['maxItems']==13
-    item=lines['items']['properties']['evidence']['items']
+    slots=schema['properties']['slots'];assert len(slots['properties'])==13
+    assert slots['required']==list(slots['properties']) and slots['additionalProperties'] is False
+    item=slots['properties']['ray_setup']['properties']['evidence']['items']
     assert list(item['properties'])==['quote_id'] and item['properties']['quote_id']['enum']==list(entries)
 
 
@@ -43,7 +44,7 @@ def test_relevance_requires_true_boolean_and_observation_mechanism_two_sources(m
     def ask(model,system,prompt,schema,endpoint,seed,effort):
         assert effort=='low'
         ids=list(prompt['sentence_catalog']);first=next(k for k in ids if k.startswith('S0'));second=next(k for k in ids if k.startswith('S1'))
-        return {'source_assessments':[{'source_index':i,'usable':True,'reason':'Synthetic fixture'} for i in range(2)],'supported':True if mode[0]!='string_false' else 'false','observable_quote_ids':[first],'mechanism_quote_ids':[second if mode[0]!='one_source' else first],'issues':[]},{'usage':{'cost':'0'}}
+        return {'topic_assessment':{'suitable':True,'reason':'Synthetic suitability fixture'},'source_assessments':[{'source_index':i,'usable':True,'reason':'Synthetic fixture'} for i in range(2)],'supported':True if mode[0]!='string_false' else 'false','observable_quote_ids':[first],'mechanism_quote_ids':[second if mode[0]!='one_source' else first],'issues':[]},{'usage':{'cost':'0'}}
     monkeypatch.setattr(storyboard,'ask',ask)
     assert evidence.screen('Synthetic observation?',sources(),'synthetic')[0]
     mode[0]='one_source';assert not evidence.screen('Synthetic observation?',sources(),'synthetic')[0]
@@ -117,7 +118,7 @@ def test_relevance_rejects_inconsistent_source_assessments_and_selected_evidence
     def ask(model,system,prompt,schema,*args,**kwargs):
         assert schema['properties']['source_assessments']['minItems']==2
         assessments=[{'source_index':0,'usable':True,'reason':'Synthetic fixture'},{'source_index':1,'usable':True,'reason':'Synthetic fixture'}]
-        result={'source_assessments':assessments,'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]}
+        result={'topic_assessment':{'suitable':True,'reason':'Synthetic suitability fixture'},'source_assessments':assessments,'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]}
         if mode=='flagged_source':assessments[1]['usable']=False
         if mode=='duplicate_assessment':assessments[1]['source_index']=0
         if mode=='missing_assessment':assessments.pop()
@@ -136,7 +137,7 @@ def test_valid_source_subset_excludes_unusable_pool_records_before_drafting(monk
     monkeypatch.setattr(autonomy,'questions',lambda *args:([{'question':'Synthetic observation?','search_terms':'synthetic mechanism'}],{}))
     monkeypatch.setattr(autonomy,'research',lambda *args:(pool,{}))
     def ask(model,system,prompt,schema,*args,**kwargs):
-        return {'source_assessments':[{'source_index':i,'usable':i<2,'reason':'Synthetic fixture'} for i in range(3)],'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]},{}
+        return {'topic_assessment':{'suitable':True,'reason':'Synthetic suitability fixture'},'source_assessments':[{'source_index':i,'usable':i<2,'reason':'Synthetic fixture'} for i in range(3)],'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]},{}
     monkeypatch.setattr(storyboard,'ask',ask)
     selected,approved,audit=autonomy.select_and_research('synthetic',[])
     assert selected=='Synthetic observation?' and approved==pool[:2] and len(pool)==3
