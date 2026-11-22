@@ -1,0 +1,5 @@
+FROM python:3.11-slim-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends build-essential pkg-config libcairo2-dev libpango1.0-dev ffmpeg fonts-dejavu-core && pip install --no-cache-dir manim==0.20.1 && rm -rf /var/lib/apt/lists/*
+ENV PYTHONDONTWRITEBYTECODE=1
+USER 65534:65534
+WORKDIR /tmp
