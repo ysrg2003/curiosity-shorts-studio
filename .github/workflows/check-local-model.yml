@@ -1,6 +1,11 @@
-name: Inspect local model metadata without inference
+name: Inspect local model metadata or bounded response probe
 on:
   workflow_dispatch:
+    inputs:
+      response_probe:
+        description: Optional tiny local response test, not episode content
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -10,6 +15,8 @@ jobs:
   inspect:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    env:
+      RESPONSE_PROBE: ${{ inputs.response_probe }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -17,7 +24,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Inspect pinned local model, no inference or model-service credentials
+      - name: Inspect pinned model or optional bounded response, no model-service credentials
         shell: bash
         run: |
           set -euo pipefail
@@ -32,4 +39,8 @@ jobs:
             sleep 1
           done
           /tmp/ollama/bin/ollama pull qwen3:4b-instruct
-          PYTHONPATH=src python -m curiosity.local_ai --inspect-only
+          if [ "$RESPONSE_PROBE" = true ]; then
+            PYTHONPATH=src python -m curiosity.local_ai --probe-only
+          else
+            PYTHONPATH=src python -m curiosity.local_ai --inspect-only
+          fi
