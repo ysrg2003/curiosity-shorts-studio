@@ -30,6 +30,18 @@ def passage_rank(question,text,title=''):
     return max(scores) if scores else -100.0
 
 
+
+def content_body(text):
+    """Do not offer appendices, bibliography titles or external-link lists as evidence."""
+    endings={'references','notes','citations','bibliography','further reading','external links','sources','works cited'}
+    lines=text.splitlines(keepends=True);offset=0
+    for line in lines:
+        stripped=line.strip()
+        if stripped.startswith('==') and stripped.endswith('==') and stripped.strip('= ').casefold() in endings:
+            return text[:offset].rstrip()
+        offset+=len(line)
+    return text
+
 def source_pack(topic,sources,budget=9500,semantic=False):
     import pysbd
     segmenter=pysbd.Segmenter(language='en',clean=False,char_span=True)
@@ -37,7 +49,7 @@ def source_pack(topic,sources,budget=9500,semantic=False):
     each=max(1200,budget//max(1,len(sources)))
     packed=[]
     for source in sources:
-        text=source['text'];spans=segmenter.segment(text)
+        text=content_body(source['text']);spans=segmenter.segment(text)
         scores=[sum(term in span.sent.lower() for term in terms) for span in spans]
         def window(width):
             best=None
