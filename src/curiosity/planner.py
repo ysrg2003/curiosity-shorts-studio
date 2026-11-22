@@ -96,7 +96,12 @@ def draft(topic, target, source_urls=None, model='qwen3:4b', endpoint='http://12
     write_json(target.with_suffix('.research.json'),{'topic':topic,'sources':[{'url':x['url'],'title':x.get('title',''),'excerpt_sha256':hashlib.sha256(x['text'].encode()).hexdigest(),'excerpt_characters':len(x['text'])} for x in packed], 'note':'Source text is processed in memory. Only literal evidence quotes used by the draft are retained in episode JSON.'})
     audit=[];feedback=[]
     for attempt in range(3):
-        obj,stats=ask(model,SYSTEM,{'topic':topic,'variation':index,'sources':packed,'revision_feedback':feedback},schema(),endpoint,42+index+attempt)
+        from .remote_ai import ModelOutputInvalid
+        try:obj,stats=ask(model,SYSTEM,{'topic':topic,'variation':index,'sources':packed,'revision_feedback':feedback},schema(),endpoint,42+index+attempt)
+        except ModelOutputInvalid as error:
+            audit.append({'attempt':attempt+1,'rejected':'incomplete_or_schema_invalid_model_output','response_shape':error.metadata})
+            feedback=['Return one complete valid JSON object matching every requested field and type. No preamble. Do not truncate the script.']
+            continue
         from .staging import stage_story
         obj,staging=stage_story(obj)
         shape={'speakers':[x.get('speaker') for x in obj.get('lines',[])], 'beats':[x.get('beat') for x in obj.get('lines',[])], 'words':sum(len(x.get('text','').split()) for x in obj.get('lines',[])), 'staging':staging}
