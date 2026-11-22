@@ -17,6 +17,7 @@ def synthetic_entailment_scores(monkeypatch):
 @pytest.mark.parametrize('decision,accepted', [('missing', False), (False, False), ('true', False), (True, True)])
 def test_topic_acceptance_must_be_explicit_literal_true(monkeypatch, decision, accepted):
     def ask(*args, **kwargs):
+        if 'complete_answer' in args[3]['properties']:return {'complete_answer':True,'qualifiers_preserved':True,'no_exclusive_or_universal_overclaim':True,'issues':[]},{}
         result = {'answer': 'Synthetic fixture observations remain fictional in this bounded unit test.',
                   'answer_quote_ids': ['S0Q0', 'S1Q0'],
                   'supported': True, 'source_assessments': [
