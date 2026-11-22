@@ -20,10 +20,29 @@ def load_renderer(spec, out):
     return module
 
 
+def install_lipsync(module):
+    chars = module.chars
+    original = getattr(chars,'_unaligned_render_head',chars.render_head)
+    chars._unaligned_render_head = original
+    state = {'speaker':None,'amplitude':0}
+    def aligned_head(who,r,f=None,*args,**kwargs):
+        if who == state['speaker']:
+            f = dict(f or chars.PRESETS['neutral'])
+            a = state['amplitude']
+            f['mouth'] = 'open' if a > 0.075 else 'closed'
+            f['m_open'] = 0.14 + 0.76*a
+        return original(who,r,f,*args,**kwargs)
+    chars.render_head = aligned_head
+    return state
+
+
 def render(spec, out, seconds=None, width=1080):
     from PIL import ImageDraw
     module = load_renderer(spec, out)
     tl = json.loads((Path(out) / 'timeline.json').read_text())
+    lipsync = install_lipsync(module)
+    if hasattr(module,'draw_caption'):module.draw_caption=lambda *args:None
+    if hasattr(module,'caption'):module.caption=lambda *args:None
     total = min(tl['total'], seconds) if seconds else tl['total']
     fps = 24
     height = width * 16 // 9
@@ -41,6 +60,9 @@ def render(spec, out, seconds=None, width=1080):
         for fr in range(math.ceil(total*fps)):
             t = fr/fps
             ln = module.line_at(t)
+            env = ln.get('mouth_envelope',[])
+            pos = int(max(0,t-ln['start'])*ln.get('mouth_hz',40))
+            lipsync.update(speaker=ln['speaker'],amplitude=env[pos] if pos<len(env) and t>=ln['start'] else 0)
             beat = ln['beat']
             frame = module.beat_frame(beat, t)
             dt = t - ln['start']
@@ -49,8 +71,16 @@ def render(spec, out, seconds=None, width=1080):
                 frame = module.Image.blend(module.dialogue_frame(module.RIG_PREV[beat], ln['start']-0.001), frame, module.staging.smooth(dt/0.35))
             elif hasattr(module, 'AFTER_RIG') and beat in module.AFTER_RIG and 0 <= dt < 0.25:
                 frame = module.Image.blend(module.rig_frame(module.AFTER_RIG[beat]-0.01), frame, module.staging.smooth(dt/0.25))
-            elif hasattr(module, 'DLG_PREV') and beat in module.DLG_PREV and 0 <= dt < 0.25:
-                frame = module.Image.blend(module.dialogue_frame(module.DLG_PREV[beat], ln['start']-0.001), frame, dt/0.25)
+            # Clean dialogue cuts avoid double faces and doubled text during crossfades.
+            if ln['idx'] in module.CAPS:
+                cap=module.CAPS[ln['idx']]
+                for c in range(cap.n_lines()):
+                    st,en=cap.span(c)
+                    if st<=t<en:
+                        current=next((i for i in cap.lines[c] if cap.words[i]['start']-0.02<=t<=cap.words[i]['end']+0.10),-1)
+                        im=cap.render(c,current)
+                        frame.paste(im,((1080-im.width)//2,module.staging.KaraokeCap.Y),im)
+                        break
             draw = ImageDraw.Draw(frame, 'RGBA')
             draw.text((1010, 80), 'Y?', font=module.F_WM, fill=(245, 184, 65, 90), anchor='mm')
             if width != 1080:
