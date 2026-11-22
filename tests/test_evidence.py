@@ -206,3 +206,30 @@ def test_scope_plan_requires_original_source_citations():
     assert evidence.validate_scope_plan(plan,entries)['accepted']
     plan[0]['quote_ids']=[]
     assert not evidence.validate_scope_plan(plan,entries)['accepted']
+
+
+def test_scope_contract_failure_preserves_original_output_and_upstream_evidence(monkeypatch):
+    calls=[]
+    raw={'findings':[{'explanation':'Untrusted original scope explanation remains unchanged. '*40}]}
+    def ask(model,system,prompt,shape,*args,**kwargs):
+        calls.append(shape)
+        if 'findings' in shape['properties']:
+            assert shape['properties']['findings']['items']['properties']['explanation']['maxLength']==1600
+            raise remote_ai.ModelOutputInvalid({'validation':'synthetic_contract_failure'},model_output=raw)
+        ids=list(prompt['sentence_catalog']);first=next(k for k in ids if k.startswith('S0'));second=next(k for k in ids if k.startswith('S1'))
+        return {'scope_constraints':[],'topic_assessment':{'suitable':True,'reason':'fits_short_visual_science'},'source_assessments':[{'source_index':i,'usable':True,'reason':'current_observation_or_mechanism'} for i in range(2)],'answer':'Synthetic observations remain fictional in this bounded unit test.','answer_quote_ids':[first,second],'supported':True,'observable_quote_ids':[first],'mechanism_quote_ids':[second],'issues':[]},{}
+    monkeypatch.setattr(storyboard,'ask',ask)
+    accepted,report=evidence.screen('Synthetic observation?',sources(),'synthetic')
+    assert not accepted and len(calls)==2 and report['approved_source_indices']==[]
+    assert report['packed_original_sources']==sources() and report['selected_original_evidence']
+    qualification=report['independent_entailment']['qualification_audit']
+    assert qualification['untrusted_original_output']==raw and qualification['failure_stage']=='scope_audit_contract_invalid'
+    assert report['independent_entailment']['accepted'] is True
+
+
+def test_scope_diagnostic_length_does_not_relax_source_or_decision_requirements():
+    entries=evidence.catalog(sources());key=next(iter(entries))
+    audit={'findings':[{'problem':'missing_condition','explanation':'Synthetic diagnostic condition. '*20,'quote_ids':[key]}],'complete_answer':False,'qualifiers_preserved':False,'no_exclusive_or_universal_overclaim':False,'issues':['answer_not_supported']}
+    assert evidence.validate_scope_findings(audit,entries)['accepted']
+    audit['findings'][0]['quote_ids']=['fabricated']
+    assert not evidence.validate_scope_findings(audit,entries)['accepted']
