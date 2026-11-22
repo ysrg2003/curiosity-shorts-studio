@@ -29,7 +29,7 @@ def check_free_catalog():
     if not model or not model.get('pricing'):raise ValueError('Free router is unavailable in the live model catalog')
     for value in model['pricing'].values():
         if value is not None and Decimal(str(value))!=0:raise ValueError('Model pricing is no longer zero. No request sent.')
-    return True
+    return {item['id'] for item in data.get('data',[]) if isinstance(item.get('id'),str)}
 
 
 def strict_schema(schema):
@@ -52,6 +52,8 @@ def checked_usage(usage):
         except Exception:raise UnexpectedModelCost('Cannot validate reported model cost. Stop further calls.') from None
         if not amount.is_finite() or amount!=0:raise UnexpectedModelCost('Unexpected nonzero model cost. Stop all further model calls and inspect account activity.')
     result={name:int(usage[name]) for name in ('prompt_tokens','completion_tokens','total_tokens') if isinstance(usage.get(name),int)}
+    details=usage.get('completion_tokens_details') or {}
+    if isinstance(details,dict) and isinstance(details.get('reasoning_tokens'),int):result['reasoning_tokens']=details['reasoning_tokens']
     if cost is not None:result['cost']=str(amount)
     return result
 
@@ -73,13 +75,15 @@ def object_from_text(text):
 def request(prompt,system,schema=None,json_mode=False):
     key=os.environ.get('OPENROUTER_API_KEY','').strip()
     if not key:raise ValueError('Missing OPENROUTER_API_KEY Actions secret. Never put its value in code or logs.')
-    check_free_catalog()
+    public_models=check_free_catalog()
     from ai_router.providers.openai_compatible import OpenAICompatibleAdapter
     shape={}
     class AuditedAdapter(OpenAICompatibleAdapter):
         def _body(self,response):
             body=super()._body(response)
             shape['http_status']=int(response.status_code)
+            resolved=body.get('model')
+            if isinstance(public_models,set) and isinstance(resolved,str):shape['resolved_public_model']=resolved if resolved in public_models else 'unlisted'
             choices=body.get('choices') or []
             shape['choice_count']=len(choices) if isinstance(choices,list) else 0
             if choices and isinstance(choices,list) and isinstance(choices[0],dict):
@@ -89,7 +93,8 @@ def request(prompt,system,schema=None,json_mode=False):
                 if isinstance(message,dict):shape['content_characters']=len(self._content_text(message.get('content')))
             if isinstance(body.get('usage'),dict):shape['usage']=checked_usage(body['usage'])
             return body
-    profile={'max_tokens_field':'max_tokens','max_tokens':12000}
+    # OpenRouter documents this shorthand. Low effort leaves more room for final content; it is not a guarantee against truncation.
+    profile={'max_tokens_field':'max_tokens','max_tokens':12000,'reasoning_effort':'low'}
     if schema:profile.update(response_format={'type':'json_schema','json_schema':{'name':'curiosity_response','schema':strict_schema(schema),'strict':True}},response_parser='json_or_text_envelope')
     elif json_mode:profile.update(response_format='json_object',response_parser='json_or_text_envelope')
     else:profile.update(response_format='none',response_parser='text_envelope')
