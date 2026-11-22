@@ -142,7 +142,7 @@ def request(prompt,system,schema=None,json_mode=False):
     return output,{'backend':'openrouter-free','model':MODEL,'usage':usage,'paid_fallback_allowed':False,'response_shape':shape,'complete_json_extracted':extracted}
 
 
-def free_quota_status():
+def free_quota_status(minimum_requests=25):
     """Read only the documented current-key daily counter; never retain labels or account details."""
     key=os.environ.get('OPENROUTER_API_KEY','').strip()
     if not key:raise ValueError('Missing OPENROUTER_API_KEY Actions secret. No request sent.')
@@ -150,15 +150,15 @@ def free_quota_status():
     try:
         response=requests.get('https://openrouter.ai/api/v1/key',headers={'Authorization':f'Bearer {key}'},timeout=25,allow_redirects=False)
         status=int(response.status_code)
-        result={'http_status':status,'daily_counter':'unknown','count1_budget':'unknown','inference_performed':False}
+        result={'http_status':status,'daily_counter':'unknown','request_budget':'unknown','inference_performed':False}
         if status!=200:return result
         data=response.json().get('data',{})
         counter=data.get('free_model_daily_requests') or {}
         remaining=counter.get('remaining')
         if type(remaining) is int:
             result['daily_counter']='at_limit' if remaining<=0 else 'has_remaining'
-            # Count1 worst case:1selection+3drafts+3reviews+5visuals*3code attempts=22calls, plus2connection checks.
-            result['count1_budget']='sufficient_for_bounded_attempt' if remaining>=24 else 'below_conservative_reserve'
+            # Count1 worst case:2proposals+3drafts+3reviews+5visuals*3code attempts=23calls, plus2connection checks.
+            result['request_budget']='sufficient_for_bounded_attempt' if remaining>=minimum_requests else 'below_conservative_reserve'
         return result
     except Exception:
-        return {'http_status':'unavailable','daily_counter':'unknown','count1_budget':'unknown','inference_performed':False}
+        return {'http_status':'unavailable','daily_counter':'unknown','request_budget':'unknown','inference_performed':False}
