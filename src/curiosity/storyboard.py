@@ -8,22 +8,25 @@ def normalized(text):return re.sub(r'\s+',' ',str(text)).strip().casefold()
 
 
 def source_pack(topic,sources,budget=9500):
+    import pysbd
+    segmenter=pysbd.Segmenter(language='en',clean=False,char_span=True)
     terms={w for w in re.findall(r'[a-z]{4,}',topic.lower()) if w not in {'does','what','when','where','about','that','this','have','with','from','happen'}}
     each=max(1200,budget//max(1,len(sources)))
     packed=[]
     for source in sources:
-        text=source['text']
-        sentences=re.split(r'(?<=[.!?])\s+',text)
-        scored=[]
-        for i,sentence in enumerate(sentences):
-            score=sum(term in sentence.lower() for term in terms)
-            if score:scored.append((score,i))
-        chosen=set()
-        for _,i in sorted(scored,reverse=True):
-            trial=chosen|{max(0,i-1),i,min(len(sentences)-1,i+1)}
-            if sum(len(sentences[j])+1 for j in trial)<=each:chosen=trial
-        excerpt=' '.join(sentences[i] for i in sorted(chosen)) if chosen else text[:each]
-        packed.append({'url':source['url'],'title':source.get('title',''),'text':excerpt[:each]})
+        text=source['text'];spans=segmenter.segment(text);best=None
+        scores=[sum(term in span.sent.lower() for term in terms) for span in spans]
+        for i,span in enumerate(spans):
+            score=0
+            for j in range(i,len(spans)):
+                end=spans[j].end
+                if end-span.start>each:break
+                score+=scores[j]
+                candidate=(score,end-span.start,-span.start,span.start,end)
+                if best is None or candidate>best:best=candidate
+        # One contiguous original span. Never splice distant claims or fabricate adjacency.
+        excerpt=text[best[3]:best[4]].strip() if best else ''
+        packed.append({'url':source['url'],'title':source.get('title',''),'text':excerpt})
     return packed
 
 
@@ -62,17 +65,21 @@ def validate_story(obj,sources,minimum=155,maximum=255):
     return {'words':words,'explanation_beats':len(explains),'source_records_used':len(used)}
 
 
-def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43):
+def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,effort='none'):
     import os
     if os.environ.get('CURIOSITY_LLM_BACKEND')=='openrouter-free':
         from .remote_ai import request
-        return request(json.dumps(prompt,ensure_ascii=False),system,schema=schema)
+        return request(json.dumps(prompt,ensure_ascii=False),system,schema=schema,effort=effort)
     payload={'model':model,'system':system,'prompt':json.dumps(prompt,ensure_ascii=False),
              'format':schema,'stream':False,'think':False,'keep_alive':'15m',
              'options':{'temperature':0.35,'num_ctx':6144,'num_predict':5000,'num_thread':4,'seed':seed}}
     req=Request(endpoint.rstrip('/')+'/api/generate',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
     with urlopen(req,timeout=1500) as r:result=json.load(r)
     obj=json.loads(result['response'])
+    from jsonschema import Draft202012Validator
+    if not Draft202012Validator(schema).is_valid(obj):
+        from .remote_ai import ModelOutputInvalid
+        raise ModelOutputInvalid({'backend':'ollama','validation':'schema_invalid'})
     return obj,{'prompt_tokens':result.get('prompt_eval_count'),'output_tokens':result.get('eval_count'),
                 'seconds':round(result.get('total_duration',0)/1e9,2),'done_reason':result.get('done_reason')}
 
