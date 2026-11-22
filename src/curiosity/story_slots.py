@@ -126,6 +126,66 @@ For each ray_explain slot supply diagram with 2 to 4 short causal labels of at m
 Title under 95 characters, useful description and 8 to 13 relevant tags. Return complete JSON matching the requested fields only. /no_think'''
 
 
+
+def incremental(model,system,prompt,contract,endpoint,seed,effort='none'):
+    """Generate planned original units. Rejected candidates never become edited text."""
+    from .storyboard import ask
+    from .remote_ai import ModelOutputInvalid
+    layout=list(LAYOUT);units=[layout[:5],layout[5:9],layout[9:]]
+    accepted={};metadata={};history=[];attempts=[]
+    original=prompt['request'] if 'request' in prompt else prompt
+    # Original source data and evidence IDs remain unchanged. Previous accepted
+    # units provide narrative context, never an invitation to edit them.
+    for unit_index,unit in enumerate(units):
+        properties={'slots':object_schema({name:contract['properties']['slots']['properties'][name] for name,_,_ in unit})}
+        if unit_index==0:
+            for key in ('title','description','tags','uncertainties'):properties[key]=contract['properties'][key]
+        # Author narration as lexical word arrays. Array cardinality is structural,
+        # unlike a spacing regex that can force concatenated words. Joining these
+        # original items with spaces is lossless serialization, not prose repair.
+        speaker_by_name={name:speaker for name,speaker,_ in unit}
+        for name,field in properties['slots']['properties'].items():
+            field=deepcopy(field);properties['slots']['properties'][name]=field
+            low,high=WORD_BOUNDS[speaker_by_name[name]]
+            del field['properties']['text']
+            field['properties']['words']={'type':'array','minItems':low,'maxItems':high,'items':{'type':'string','minLength':1,'maxLength':24,'pattern':'^'+WORD+'$'}}
+            field['required']=[key for key in field['required'] if key!='text']+['words']
+        shape=object_schema(properties)
+        failures=[];last_output=None
+        for attempt in range(2):
+            request={**original,'layout':[row for row in prompt_layout() if row['slot'] in properties['slots']['properties']],
+                     'accepted_previous_dialogue':deepcopy(history),'unit_index':unit_index+1,
+                     'output_only_this_unit':list(properties['slots']['properties']),
+                     'unit_feedback':failures,'narration_representation':'Each words array item is exactly one naturally spelled original spoken word, with punctuation attached. No spaces inside an item. End the last word with sentence punctuation. Array lengths enforce original spoken word counts. Never join words inside an item to evade limits.'}
+            try:
+                obj,stats=ask(model,system+' Generate only the current dialogue unit, not all thirteen slots. Plan each complete sentence before writing. Aim for ten words in Pip lines and twenty-two in Ray lines. Leave unsupported uncertainty metadata empty. Previously accepted dialogue is fixed context, not output.',request,shape,endpoint,seed+unit_index*2+attempt,effort=effort)
+                last_output=deepcopy(obj)
+                # Whole-schema validation still occurs when all units are present.
+                from jsonschema import Draft202012Validator
+                if not Draft202012Validator(shape).is_valid(obj):
+                    raise ModelOutputInvalid({'validation':'unit_schema_invalid'},model_output=obj)
+                for name,_,_ in unit:
+                    words=obj['slots'][name].pop('words')
+                    if any(not re.fullmatch(WORD,word) for word in words):
+                        raise ModelOutputInvalid({'validation':'lexical_word_boundary_invalid'})
+                    obj['slots'][name]['text']=' '.join(words)
+                from .readability import validate_narration
+                validate_narration({'lines':[{'text':obj['slots'][name]['text']} for name,_,_ in unit]},original.get('sources',[]))
+            except (ModelOutputInvalid,ValueError) as error:
+                if isinstance(error,ModelOutputInvalid) and error.model_output is not None:last_output=error.model_output
+                info=error.metadata if isinstance(error,ModelOutputInvalid) else {'validation':'unfinished_or_unreadable_unit'}
+                attempts.append({'unit':unit_index+1,'attempt':attempt+1,'accepted':False,'diagnostic':info})
+                failures=[{'instruction':'Generate a new complete current unit. Do not trim, splice or repair the rejected text. Every original count and evidence criterion remains.', 'failure':info}]
+                continue
+            attempts.append({'unit':unit_index+1,'attempt':attempt+1,'accepted':True,'generation':stats})
+            accepted.update(obj['slots'])
+            if unit_index==0:metadata={key:obj[key] for key in ('title','description','tags','uncertainties')}
+            history.extend({'speaker':speaker,'text':obj['slots'][name]['text']} for name,speaker,_ in unit)
+            break
+        else:
+            raise ModelOutputInvalid({'validation':'bounded_unit_generation_failed','unit_attempts':attempts},model_output={'untrusted_incomplete_unit':last_output,'accepted_prior_units':accepted})
+    return {**metadata,'slots':accepted},{'generation_mode':'three_original_dialogue_units','unit_attempts':attempts,'narration_modified':False,'representation':'original lexical word arrays serialized with single spaces'}
+
 def probe(endpoint='http://127.0.0.1:11434'):
     """Tiny synthetic control test, no topic, sources, script or production narration."""
     from .local_ai import MODEL, MANIFEST, read_metadata
