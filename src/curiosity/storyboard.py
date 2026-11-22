@@ -72,10 +72,13 @@ def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,eff
         return request(json.dumps(prompt,ensure_ascii=False),system,schema=schema,effort=effort)
     payload={'model':model,'system':system,'prompt':json.dumps(prompt,ensure_ascii=False),
              'format':schema,'stream':False,'think':False,'keep_alive':'15m',
-             'options':{'temperature':0.35,'num_ctx':6144,'num_predict':5000,'num_thread':4,'seed':seed}}
+             'options':{'temperature':0.35,'num_ctx':8192,'num_predict':5000,'num_thread':4,'seed':seed}}
     req=Request(endpoint.rstrip('/')+'/api/generate',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
     with urlopen(req,timeout=1500) as r:result=json.load(r)
-    obj=json.loads(result['response'])
+    from .remote_ai import ModelOutputInvalid,object_from_text
+    if result.get('thinking'):raise ModelOutputInvalid({'backend':'ollama','validation':'unexpected_thinking_output'})
+    try:obj=object_from_text(result['response'])
+    except (ValueError,KeyError,TypeError):raise ModelOutputInvalid({'backend':'ollama','validation':'incomplete_or_invalid_json'}) from None
     from jsonschema import Draft202012Validator
     if not Draft202012Validator(schema).is_valid(obj):
         from .remote_ai import ModelOutputInvalid
