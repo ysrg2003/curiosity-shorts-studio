@@ -6,7 +6,7 @@ from pathlib import Path
 import re
 import socket
 from urllib.parse import urlencode, urlparse
-from urllib.request import Request, urlopen
+from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
 from .spec import write_json
 
 USER_AGENT = 'CuriosityStudio/0.1 (private educational video production)'
@@ -33,9 +33,15 @@ def public_url(url):
     return url
 
 
+class PublicRedirects(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        public_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def fetch(url):
     public_url(url)
-    with urlopen(Request(url,headers={'User-Agent':USER_AGENT}), timeout=25) as r:
+    with build_opener(PublicRedirects()).open(Request(url,headers={'User-Agent':USER_AGENT}), timeout=25) as r:
         public_url(r.url)
         raw = r.read(2_000_001)
         if len(raw)>2_000_000: raise ValueError('Source exceeds 2 MB')
