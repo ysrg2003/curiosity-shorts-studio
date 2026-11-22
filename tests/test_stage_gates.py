@@ -64,9 +64,47 @@ def patch_valid_draft(monkeypatch):
     monkeypatch.setattr(storyboard, 'source_pack', lambda topic, sources: sources)
     def ask(model, system, prompt, schema, *args, **kwargs):
         if 'slots' in schema['properties']: return deepcopy(raw), {'synthetic': True}
-        return {'supported': True, 'issues': []}, {'synthetic': True}
+        return {'supported': True, 'story_compliant': True, 'issues': []}, {'synthetic': True}
     monkeypatch.setattr(storyboard, 'ask', ask)
     return raw
+
+
+@pytest.mark.parametrize('decision', ['missing', False, 'true'])
+def test_word_compliance_without_explicit_story_acceptance_cannot_pass(monkeypatch, tmp_path, decision):
+    raw, _ = fixture()
+    monkeypatch.setattr(storyboard, 'source_pack', lambda topic, sources: sources)
+    def ask(model, system, prompt, schema, *args, **kwargs):
+        if 'slots' in schema['properties']:
+            return deepcopy(raw), {'synthetic': True}
+        assert 'story_compliant' in schema['required']
+        verdict = {'supported': True, 'issues': []}
+        if decision != 'missing': verdict['story_compliant'] = decision
+        return verdict, {'synthetic': True}
+    monkeypatch.setattr(storyboard, 'ask', ask)
+    target = tmp_path / 'rejected.json'
+    with pytest.raises(ValueError, match='source/story checks'):
+        planner.draft('Synthetic fixture question?', target, source_records=records())
+    assert not target.exists()
+    report = json.loads(target.with_suffix('.audit.json').read_text())
+    assert report['accepted'] is False
+    assert all(item['source_check'].get('story_compliant') is not True for item in report['attempts'] if 'source_check' in item)
+
+
+def test_explicit_source_mode_checks_topic_before_script_inference(monkeypatch, tmp_path):
+    monkeypatch.setattr(planner, 'fetch', lambda url: 'Synthetic fixture text. It is not evidence for a real topic.')
+    monkeypatch.setattr(storyboard, 'source_pack', lambda topic, sources: sources)
+    calls = []
+    def reject(topic, sources, model, endpoint):
+        calls.append((topic, len(sources)))
+        return False, {'accepted': False, 'topic_suitability_accepted': False}
+    monkeypatch.setattr(evidence, 'screen', reject)
+    def forbidden(*args, **kwargs): raise AssertionError('Script inference started before source acceptance')
+    monkeypatch.setattr(storyboard, 'ask', forbidden)
+    target = tmp_path / 'rejected.json'
+    with pytest.raises(ValueError, match='Topic/source acceptance failed'):
+        planner.draft('Synthetic fixture question?', target, source_urls=['https://example.org/one', 'https://example.org/two'])
+    assert calls == [('Synthetic fixture question?', 2)] and not target.exists()
+    assert json.loads(target.with_suffix('.source-acceptance.json').read_text())['accepted'] is False
 
 
 def test_final_specification_cannot_be_marked_accepted_before_validation(monkeypatch, tmp_path):
