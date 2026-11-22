@@ -124,6 +124,8 @@ def isolated_transport(monkeypatch):
     monkeypatch.setattr(planner,'_PROVIDER_STOPS',{})
     monkeypatch.setattr(planner,'_LAST_WIKIMEDIA_REQUEST',None)
     monkeypatch.setattr(planner,'public_url',lambda url:url)
+    from curiosity import entailment
+    monkeypatch.setattr(entailment,'relevance_scores',lambda question,texts:autonomy.rank_texts(question,texts))
 
 
 class Response(io.BytesIO):
@@ -342,7 +344,7 @@ def test_europepmc_reads_are_serial_paced_and_cached(monkeypatch):
     assert len(calls)==2 and sleeps==[0.75]
 
 
-def test_discovery_page_and_citation_subject_filters_precede_reference_http(monkeypatch):
+def test_semantic_shortlist_keeps_lexically_sparse_pages_without_hard_overlap(monkeypatch):
     reads=[];citation_pages=[]
     monkeypatch.setattr(autonomy,'public_url',lambda url:url)
     def pages(query):return [
@@ -357,8 +359,8 @@ def test_discovery_page_and_citation_subject_filters_precede_reference_http(monk
     def article(url):reads.append(url);return {'url':url,'title':'Synthetic fixture movement','text':'Synthetic fixture motion. '*40}
     monkeypatch.setattr(autonomy,'article',article)
     sources,audit=autonomy.research('Why does a synthetic fixture move?','synthetic motion','synthetic fixture')
-    assert citation_pages==[1] and reads==['https://first.edu/fixture'] and len(sources)==2
-    assert any(row['status']=='subject_mismatch_skipped' for row in audit['discovery'])
+    assert set(citation_pages)=={1,2} and 'https://first.edu/fixture' in reads and len(sources)==3
+    assert all(row.get('status')!='subject_mismatch_skipped' for row in audit['discovery'])
 
 
 def test_reused_bm25_stemming_matches_inflections_and_ignores_question_filler():
