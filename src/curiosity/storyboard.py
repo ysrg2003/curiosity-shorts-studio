@@ -137,7 +137,7 @@ def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,eff
         failures = schema_failures(obj, schema)
         if failures['violations']:
             from .remote_ai import ModelOutputInvalid
-            raise ModelOutputInvalid({'backend':'openrouter-free','validation':'full_client_schema_invalid', **failures, 'generation': stats})
+            raise ModelOutputInvalid({'backend':'openrouter-free','validation':'full_client_schema_invalid', **failures, 'generation': stats},model_output=obj)
         return obj,stats
     payload={'model':model,'system':system,'prompt':json.dumps(prompt,ensure_ascii=False),
              'format':inference_schema(schema),'stream':False,'think':False,'keep_alive':'15m',
@@ -152,7 +152,7 @@ def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,eff
     stats = {'prompt_tokens':result.get('prompt_eval_count'),'output_tokens':result.get('eval_count'),
              'seconds':round(result.get('total_duration',0)/1e9,2),'done_reason':result.get('done_reason')}
     if failures['violations']:
-        raise ModelOutputInvalid({'backend':'ollama','validation':'schema_invalid', **failures, 'generation': stats})
+        raise ModelOutputInvalid({'backend':'ollama','validation':'schema_invalid', **failures, 'generation': stats},model_output=obj)
     return obj,stats
 
 
