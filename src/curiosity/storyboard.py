@@ -162,6 +162,9 @@ def revision_feedback(metadata):
 
 def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,effort='none'):
     import os
+    if schema.get('type')=='object' and len(schema.get('properties',{}).get('slots',{}).get('properties',{}))==13:
+        from .story_slots import incremental
+        return incremental(model,system,prompt,schema,endpoint,seed,effort)
     contract = string_contract(schema)
     if contract:
         prompt = {'request': prompt, 'prose_output_contract': contract}
@@ -177,6 +180,7 @@ def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,eff
     payload={'model':model,'system':system,'prompt':json.dumps(prompt,ensure_ascii=False),
              'format':inference_schema(schema),'stream':False,'think':False,'keep_alive':'15m',
              'options':{'temperature':0.35,'num_ctx':8192,'num_predict':5000,'num_thread':4,'seed':seed}}
+    print(json.dumps({'stage':'local_model_request','state':'started','seed':seed,'schema_fields':list(schema.get('properties',{}))}),flush=True)
     req=Request(endpoint.rstrip('/')+'/api/generate',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
     with urlopen(req,timeout=1500) as r:result=json.load(r)
     from .remote_ai import ModelOutputInvalid,object_from_text
@@ -186,6 +190,7 @@ def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,eff
     failures = schema_failures(obj, schema)
     stats = {'prompt_tokens':result.get('prompt_eval_count'),'output_tokens':result.get('eval_count'),
              'seconds':round(result.get('total_duration',0)/1e9,2),'done_reason':result.get('done_reason')}
+    print(json.dumps({'stage':'local_model_request','state':'completed','seed':seed,'seconds':stats['seconds'],'output_tokens':stats['output_tokens'],'contract_accepted':not bool(failures['violations'])}),flush=True)
     if failures['violations']:
         raise ModelOutputInvalid({'backend':'ollama','validation':'schema_invalid', **failures, 'generation': stats},model_output=obj)
     return obj,stats
