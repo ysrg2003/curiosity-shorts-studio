@@ -8,6 +8,26 @@ CHANNEL = 'UCEawmiljBdHvnTScqnpPftw'
 SCOPES = ['https://www.googleapis.com/auth/youtube.upload', 'https://www.googleapis.com/auth/youtube.readonly']
 
 
+class UploadRejected(ValueError):pass
+class UploadUncertain(RuntimeError):pass
+
+
+def failure_message(error):
+    if isinstance(error,(UploadRejected,UploadUncertain)):return str(error)
+    return 'Publication stopped. Details withheld to protect credentials and unverified video identifiers. Check YouTube Studio and the reserved ledger before any retry.'
+
+
+def write_ledger(path,data):
+    if os.environ.get('CURIOSITY_PUBLIC_LEDGER')=='1':
+        safe={}
+        for key,record in data.items():
+            allowed={'state','reservation','source_run','privacy'}
+            if record.get('state')=='verified' and record.get('privacy')=='public':allowed|={'channel','video_id'}
+            safe[key]={k:v for k,v in record.items() if k in allowed}
+        write_json(path,safe)
+    else:write_json(path,data)
+
+
 def authorize(client_path, token_path):
     from google_auth_oauthlib.flow import InstalledAppFlow
     flow = InstalledAppFlow.from_client_secrets_file(str(client_path), SCOPES)
@@ -34,23 +54,23 @@ def preflight(bundle, expected_hash, channel=CHANNEL):
     m = json.loads((bundle/'manifest.json').read_text())
     actual = digest(bundle/'final.mp4')
     if actual != expected_hash or m.get('reviewed_sha256') != actual or m.get('video_sha256') != actual:
-        raise ValueError('Specific full video hash must be reviewed before upload')
+        raise UploadRejected('Specific full video hash must be reviewed before upload')
     if not m.get('qa_pass') or m.get('preview'):
-        raise ValueError('Preview or failed QA cannot be uploaded')
+        raise UploadRejected('Preview or failed QA cannot be uploaded')
     if m['spec_sha256'] != digest(bundle/'episode.json'):
-        raise ValueError('Episode metadata changed after review')
+        raise UploadRejected('Episode metadata changed after review')
     spec = read_spec(bundle/'episode.json')
     if (not spec.get('science_reviewed') and not m.get('science_accepted_by_operator')) or not spec.get('sources'):
-        raise ValueError('Science review and sources required')
+        raise UploadRejected('Science review and sources required')
     if channel != CHANNEL:
-        raise ValueError('Channel does not match configured owner')
+        raise UploadRejected('Channel does not match configured owner')
     return m,spec
 
 
 def upload(bundle, token_path, ledger_path, expected_hash, privacy='private', expected_channel=CHANNEL, service=None):
     from googleapiclient.http import MediaFileUpload
     if privacy not in ('private','unlisted','public'):
-        raise ValueError('Invalid privacy')
+        raise UploadRejected('Invalid privacy')
     bundle, ledger_path = Path(bundle),Path(ledger_path)
     manifest,spec = preflight(bundle, expected_hash, expected_channel)
     ledger = json.loads(ledger_path.read_text()) if ledger_path.exists() else {}
@@ -58,14 +78,14 @@ def upload(bundle, token_path, ledger_path, expected_hash, privacy='private', ex
         record=ledger[expected_hash]
         reservation=os.environ.get('CURIOSITY_UPLOAD_RESERVATION')
         if not reservation or record.get('state')!='reserved' or record.get('reservation')!=reservation:
-            raise ValueError('This video is already uploaded or its upload outcome is uncertain. Resolve ledger before retrying.')
+            raise UploadRejected('This video is already uploaded or its upload outcome is uncertain. Resolve ledger before retrying.')
     yt = service or client(token_path)
     channels = yt.channels().list(part='id', mine=True).execute().get('items',[])
     if [c['id'] for c in channels] != [expected_channel]:
-        raise ValueError('Authorized account is not the single expected YouTube channel')
+        raise UploadRejected('Authorized account is not the single expected YouTube channel')
     # Reserve before the external call. Workflow persists this reservation before invoking upload.
     ledger[expected_hash] = {'state':'in_progress','channel':expected_channel,'privacy':privacy}
-    write_json(ledger_path,ledger)
+    write_ledger(ledger_path,ledger)
     body = {'snippet':{'title':spec['title'],'description':spec.get('description','')+'\n\nSources:\n'+'\n'.join(spec['sources']),
                        'tags':spec.get('tags',[]),'categoryId':'27','defaultLanguage':spec.get('language','en')},
             'status':{'privacyStatus':privacy,'selfDeclaredMadeForKids':False}}
@@ -74,13 +94,13 @@ def upload(bundle, token_path, ledger_path, expected_hash, privacy='private', ex
     while response is None:
         _, response = request.next_chunk(num_retries=3)
     video_id = response['id']
-    ledger[expected_hash].update(state='uploaded',video_id=video_id)
-    write_json(ledger_path,ledger)
+    ledger[expected_hash].update(state='uploaded_unverified',video_id=video_id)
+    write_ledger(ledger_path,ledger)
     result = yt.videos().list(part='status,snippet',id=video_id).execute()['items'][0]
     if result['snippet']['channelId'] != expected_channel or result['status']['privacyStatus'] != privacy:
-        raise RuntimeError('Uploaded, but channel/privacy verification failed. Do not retry.')
+        raise UploadUncertain('Uploaded, but channel/privacy verification failed. Do not retry. Inspect YouTube Studio before reconciling the reserved ledger.')
     ledger[expected_hash]['state']='verified'
-    write_json(ledger_path,ledger)
+    write_ledger(ledger_path,ledger)
     # This application receives a real video ID directly from the API.
     receipt = {'video_id':video_id,'url':'https://www.youtube.com/watch?v='+video_id,
                'privacy':privacy,'channel':expected_channel,'processing_status':result['status'].get('uploadStatus')}
