@@ -70,7 +70,7 @@ def main(argv=None):
     dra = sub.add_parser('draft')
     dra.add_argument('--topic',required=True)
     dra.add_argument('--source',action='append')
-    dra.add_argument('--model',default='qwen3:4b')
+    dra.add_argument('--model',default='qwen3:4b-instruct')
     dra.add_argument('--out',default='draft.json')
     dra.add_argument('--index',type=int,default=1)
     args = p.parse_args(argv)
