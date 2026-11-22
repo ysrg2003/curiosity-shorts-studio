@@ -5,7 +5,7 @@ import os
 from decimal import Decimal
 from urllib.request import urlopen
 
-MODEL='openrouter/free'
+MODEL='particle-ai/particle-1:free'
 
 
 class ModelOutputInvalid(ValueError):
@@ -26,9 +26,13 @@ class UnexpectedModelCost(RuntimeError):pass
 def check_free_catalog():
     with urlopen('https://openrouter.ai/api/v1/models',timeout=25) as response:data=json.load(response)
     model=next((item for item in data.get('data',[]) if item.get('id')==MODEL),None)
-    if not model or not model.get('pricing'):raise ValueError('Free router is unavailable in the live model catalog')
+    if not MODEL.endswith(':free') or not model or not model.get('pricing'):raise ValueError('The explicit free model is unavailable in the live model catalog')
     for value in model['pricing'].values():
         if value is not None and Decimal(str(value))!=0:raise ValueError('Model pricing is no longer zero. No request sent.')
+    required={'response_format','structured_outputs','reasoning_effort'}
+    reasoning=model.get('reasoning') or {}
+    if not required.issubset(set(model.get('supported_parameters',[]))) or reasoning.get('mandatory') is not False or 'none' not in (reasoning.get('supported_efforts') or []):
+        raise ValueError('The free model no longer advertises structured output and supported reasoning-off control. No request sent.')
     return {item['id'] for item in data.get('data',[]) if isinstance(item.get('id'),str)}
 
 
@@ -93,8 +97,8 @@ def request(prompt,system,schema=None,json_mode=False):
                 if isinstance(message,dict):shape['content_characters']=len(self._content_text(message.get('content')))
             if isinstance(body.get('usage'),dict):shape['usage']=checked_usage(body['usage'])
             return body
-    # OpenRouter documents this shorthand. Low effort leaves more room for final content; it is not a guarantee against truncation.
-    profile={'max_tokens_field':'max_tokens','max_tokens':12000,'reasoning_effort':'low'}
+    # Use only an explicit free model whose live catalog advertises reasoning-off support.
+    profile={'max_tokens_field':'max_tokens','max_tokens':12000,'reasoning_effort':'none'}
     if schema:profile.update(response_format={'type':'json_schema','json_schema':{'name':'curiosity_response','schema':strict_schema(schema),'strict':True}},response_parser='json_or_text_envelope')
     elif json_mode:profile.update(response_format='json_object',response_parser='json_or_text_envelope')
     else:profile.update(response_format='none',response_parser='text_envelope')
