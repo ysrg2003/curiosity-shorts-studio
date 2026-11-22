@@ -126,3 +126,64 @@ def story(obj):
     report['uncertainty_checks'] = metadata
     report['accepted'] = report['accepted'] and all(item['accepted'] for item in metadata)
     return report
+
+
+# Passage relevance is separate from the entailment model and its0.90gate.
+RERANK_MODEL = 'cross-encoder/ms-marco-MiniLM-L6-v2'
+RERANK_REVISION = '233902d25c440f23af6f7d6e94d2946bac0bee0a'
+RERANK_FILES = {
+    'tokenizer.json': ('d241a60d5e8f04cc1b2b3e9ef7a4921b27bf526d9f6050ab90f9267a1f9e5c66',711396),
+    'onnx/model_quint8_avx2.onnx': ('c80a8b34256ea453093d612e3ac48d3d965a0c0a48c7906709af8b8e28461bf9',23200716),
+}
+
+
+def rerank_artifact(name):
+    expected,size=RERANK_FILES[name]
+    path=Path.home()/'.cache'/'curiosity-reranker'/RERANK_REVISION/Path(name).name
+    if not path.exists() or path.stat().st_size!=size or hashlib.sha256(path.read_bytes()).hexdigest()!=expected:
+        url='https://huggingface.co/'+RERANK_MODEL+'/resolve/'+RERANK_REVISION+'/'+name
+        with urlopen(url,timeout=90) as response:data=response.read(size+1)
+        if len(data)!=size or hashlib.sha256(data).hexdigest()!=expected:
+            raise ValueError('Relevance model failed pinned size/hash verification')
+        path.parent.mkdir(parents=True,exist_ok=True)
+        temporary=path.with_suffix(path.suffix+'.download');temporary.write_bytes(data);temporary.replace(path)
+    return path
+
+
+@lru_cache(maxsize=1)
+def rerank_engine():
+    import onnxruntime as ort
+    from tokenizers import Tokenizer
+    tokenizer=Tokenizer.from_file(str(rerank_artifact('tokenizer.json')))
+    tokenizer.enable_padding(pad_id=0,pad_token='[PAD]')
+    # Retrieval may compare bounded passage windows. This is not the NLI engine,
+    # whose evidence is never silently truncated.
+    options=ort.SessionOptions();options.intra_op_num_threads=2;options.inter_op_num_threads=1
+    session=ort.InferenceSession(str(rerank_artifact('onnx/model_quint8_avx2.onnx')),
+                                sess_options=options,providers=['CPUExecutionProvider'])
+    return tokenizer,session
+
+
+def relevance_scores(question,passages):
+    """Uncalibrated relevance logits for ordering only, no acceptance threshold."""
+    import numpy as np
+    if not passages:return []
+    if len(passages)>500 or not question.strip() or len(question)>300 or any(not text.strip() or len(text)>8000 for text in passages):
+        raise ValueError('Relevance requires1to500bounded nonempty passages and a bounded question')
+    tokenizer,session=rerank_engine();result=[]
+    for offset in range(0,len(passages),16):
+        batch=passages[offset:offset+16]
+        encoded=tokenizer.encode_batch([(question,text) for text in batch])
+        # A retrieval window is explicit and logged. The original article text
+        # remains unchanged for the later source/evidence/entailment checks.
+        for item in encoded:item.truncate(512)
+        width=max(len(item.ids) for item in encoded)
+        ids=[];masks=[];types=[]
+        for item in encoded:
+            padding=width-len(item.ids)
+            ids.append(item.ids+[0]*padding);masks.append(item.attention_mask+[0]*padding);types.append(item.type_ids+[0]*padding)
+        inputs={'input_ids':np.array(ids,dtype=np.int64),'attention_mask':np.array(masks,dtype=np.int64),
+                'token_type_ids':np.array(types,dtype=np.int64)}
+        logits=session.run(None,inputs)[0].reshape(-1)
+        result.extend(round(float(score),6) for score in logits)
+    return result
