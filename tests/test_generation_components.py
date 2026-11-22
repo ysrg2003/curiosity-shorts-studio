@@ -44,7 +44,7 @@ def test_remote_missing_secret_stops_before_network(monkeypatch):
     with pytest.raises(ValueError,match='Missing'):remote_ai.request('synthetic prompt','synthetic system')
 
 
-def test_reuses_owner_adapter_with_only_free_router(monkeypatch):
+def test_reuses_owner_adapter_with_only_explicit_free_model(monkeypatch):
     OpenAICompatibleAdapter=pytest.importorskip('ai_router.providers.openai_compatible').OpenAICompatibleAdapter
     monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-unit-test-only')
     monkeypatch.setattr(remote_ai,'check_free_catalog',lambda:True)
@@ -52,7 +52,7 @@ def test_reuses_owner_adapter_with_only_free_router(monkeypatch):
     def call(self,**kwargs):seen.update(kwargs);return SimpleNamespace(payload={'answer':'test'},usage={'cost':0,'total_tokens':5})
     monkeypatch.setattr(OpenAICompatibleAdapter,'complete_json',call)
     output,stats=remote_ai.request('synthetic prompt','synthetic system',json_mode=True)
-    assert output=={'answer':'test'} and seen['model']=='openrouter/free'
+    assert output=={'answer':'test'} and seen['model']==remote_ai.MODEL
     assert not stats['paid_fallback_allowed'] and 'models' not in seen and 'tools' not in seen
 
 
@@ -79,9 +79,9 @@ def test_real_owner_http_adapter_plaintext_and_json(monkeypatch):
     obj,_=remote_ai.request('synthetic','synthetic',schema={'type':'object','properties':{'answer':{'type':'string'}},'required':['answer']})
     assert obj=={'answer':'test'}
     assert all(url=='https://openrouter.ai/api/v1/chat/completions' for url,_ in calls)
-    assert all(kwargs['json']['model']=='openrouter/free' and 'tools' not in kwargs['json'] and 'models' not in kwargs['json'] for _,kwargs in calls)
+    assert all(kwargs['json']['model']==remote_ai.MODEL and 'tools' not in kwargs['json'] and 'models' not in kwargs['json'] for _,kwargs in calls)
     assert calls[1][1]['json']['response_format']['json_schema']['schema']['additionalProperties'] is False
-    assert all(kwargs['json']['reasoning_effort']=='low' for _,kwargs in calls)
+    assert all(kwargs['json']['reasoning_effort']=='none' for _,kwargs in calls)
 
 
 def test_real_child_never_inherits_model_or_repository_secrets(monkeypatch):
@@ -256,3 +256,16 @@ def test_only_public_catalog_model_id_and_numeric_reasoning_count_enter_diagnost
     model[0]='synthetic private value'
     _,stats=remote_ai.request('synthetic','synthetic',json_mode=True)
     assert stats['response_shape']['resolved_public_model']=='unlisted' and 'private value' not in str(stats)
+
+
+def test_live_catalog_guard_requires_zero_price_and_explicit_reasoning_off_support(monkeypatch):
+    import io,json
+    model={'id':remote_ai.MODEL,'pricing':{'prompt':'0','completion':'0'},'supported_parameters':['response_format','structured_outputs','reasoning_effort'],'reasoning':{'mandatory':False,'supported_efforts':['none']}}
+    monkeypatch.setattr(remote_ai,'urlopen',lambda *a,**k:io.StringIO(json.dumps({'data':[model]})))
+    assert remote_ai.MODEL in remote_ai.check_free_catalog()
+    model['pricing']['completion']='0.000001'
+    with pytest.raises(ValueError,match='pricing'):remote_ai.check_free_catalog()
+    model['pricing']['completion']='0';model['reasoning']['mandatory']=True
+    with pytest.raises(ValueError,match='reasoning-off'):remote_ai.check_free_catalog()
+    model['reasoning']['mandatory']=False;model['supported_parameters']=[]
+    with pytest.raises(ValueError,match='structured output'):remote_ai.check_free_catalog()
