@@ -29,6 +29,21 @@ def inspect():
     return {**snapshot(installed,shown),'server_version':safe}
 
 
+def probe():
+    """One bounded local control test, never an episode input or truth check."""
+    installed,shown=read_metadata()
+    if not installed or installed.get('digest')!=MANIFEST:raise ValueError('Probe requires the inspected pinned instruct manifest')
+    payload={'model':MODEL,'prompt':'Return only the JSON object with ready set to true.','format':{'type':'object','properties':{'ready':{'type':'boolean'}},'required':['ready'],'additionalProperties':False},'stream':False,'think':False,'options':{'num_ctx':1024,'num_predict':64,'temperature':0,'seed':1,'num_thread':4}}
+    request=Request('http://127.0.0.1:11434/api/generate',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
+    with urlopen(request,timeout=120) as response:result=json.load(response)
+    text=result.get('response','');thinking=result.get('thinking','')
+    try:obj=json.loads(text)
+    except (ValueError,TypeError):obj=None
+    accepted=isinstance(obj,dict) and set(obj)=={'ready'} and obj['ready'] is True and isinstance(thinking,str) and not thinking and result.get('done') is True and result.get('done_reason')=='stop'
+    tokens=result.get('eval_count');reason=result.get('done_reason')
+    return {'accepted':accepted,'manifest_verified':True,'inference_performed':True,'thinking_characters':len(thinking) if isinstance(thinking,str) else -1,'response_characters':len(text) if isinstance(text,str) else -1,'output_tokens':tokens if type(tokens) is int else None,'done_reason':reason if reason in {'stop','length','load'} else 'unrecognized','episode_content_supplied':False}
+
+
 def verify():
     installed,shown=read_metadata()
     if not installed or installed.get('digest')!=MANIFEST:raise ValueError('Local model manifest differs from the inspected non-thinking instruct model')
@@ -46,4 +61,6 @@ if __name__=='__main__':
     import sys
     root=Path(__file__).resolve().parents[2]
     if json.loads((root/'studio.json').read_text())['draft_model']!=MODEL:raise ValueError('Configured local model differs from the pinned workflow model')
+    if '--probe-only' in sys.argv:
+        result=probe();print(json.dumps(result));sys.exit(0 if result['accepted'] else 1)
     print(json.dumps(inspect() if '--inspect-only' in sys.argv else verify()))
