@@ -324,3 +324,19 @@ def test_source_catalog_does_not_offer_truncated_sentence_fragments():
     entries = evidence.catalog(sources)
     assert len(entries) == 2 and all(item['quote'] == good for item in entries.values())
     assert sources == saved
+
+
+def test_rejected_source_answer_keeps_exact_selected_evidence_and_source_hashes(monkeypatch):
+    from curiosity import evidence
+    sources,verdict,_=source_contract_fixture();saved=deepcopy(sources)
+    monkeypatch.setattr(storyboard,'ask',lambda *args,**kwargs:(deepcopy(verdict),{'synthetic':True}))
+    monkeypatch.setattr(entailment,'score_pairs',lambda pairs:{'accepted':False,'pairs':[]})
+    accepted,audit=evidence.screen('Why do synthetic objects move?',sources,'synthetic')
+    assert not accepted and sources==saved
+    selected={row['quote_id']:row for row in audit['selected_original_evidence']}
+    assert set(selected)=={'S0Q0','S1Q0'}
+    for key,row in selected.items():
+        index=row['source_index']
+        assert row['quote'] in sources[index]['text']
+        assert audit['source_snapshot'][index]['excerpt_sha256']==hashlib.sha256(sources[index]['text'].encode()).hexdigest()
+        assert audit['source_snapshot'][index]['url']==sources[index]['url']
