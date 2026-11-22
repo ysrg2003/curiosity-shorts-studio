@@ -340,3 +340,54 @@ def test_rejected_source_answer_keeps_exact_selected_evidence_and_source_hashes(
         assert row['quote'] in sources[index]['text']
         assert audit['source_snapshot'][index]['excerpt_sha256']==hashlib.sha256(sources[index]['text'].encode()).hexdigest()
         assert audit['source_snapshot'][index]['url']==sources[index]['url']
+
+
+def test_semantic_reranker_pin_validation_rejects_corrupted_download(monkeypatch,tmp_path):
+    data=b'Synthetic relevance model fixture, never executable.'
+    monkeypatch.setenv('HOME',str(tmp_path))
+    monkeypatch.setattr(entailment,'RERANK_FILES',{'fixture.bin':(hashlib.sha256(data).hexdigest(),len(data))})
+    monkeypatch.setattr(entailment,'urlopen',lambda *args,**kwargs:io.BytesIO(data))
+    path=entailment.rerank_artifact('fixture.bin');assert path.read_bytes()==data
+    path.write_bytes(b'corrupt')
+    monkeypatch.setattr(entailment,'urlopen',lambda *args,**kwargs:io.BytesIO(b'incorrect replacement'))
+    with pytest.raises(ValueError,match='size/hash'):entailment.rerank_artifact('fixture.bin')
+
+
+def test_semantic_reranker_batches_and_marks_its_own_window_not_nli_acceptance(monkeypatch):
+    import numpy as np
+    calls=[]
+    class Encoding:
+        def __init__(self):self.ids=list(range(600));self.attention_mask=[1]*600;self.type_ids=[0]*600
+        def truncate(self,size):self.ids=self.ids[:size];self.attention_mask=self.attention_mask[:size];self.type_ids=self.type_ids[:size]
+    class Tokenizer:
+        def encode_batch(self,pairs):return [Encoding() for pair in pairs]
+    class Session:
+        def run(self,outputs,inputs):
+            calls.append(inputs)
+            assert inputs['input_ids'].shape[1]==512
+            return [np.ones((len(inputs['input_ids']),1))]
+    monkeypatch.setattr(entailment,'rerank_engine',lambda:(Tokenizer(),Session()))
+    result=entailment.relevance_scores('Synthetic retrieval query?',['Fictional passage.']*33)
+    assert result==[1.0]*33 and [len(call['input_ids']) for call in calls]==[16,16,1]
+    assert entailment.THRESHOLD==0.90 and entailment.relevance_scores('Synthetic?',[])==[]
+    with pytest.raises(ValueError):entailment.relevance_scores('Synthetic?',['Fictional.']*501)
+    with pytest.raises(ValueError):entailment.relevance_scores('Synthetic?',[''])
+
+
+def test_semantic_discovery_never_deletes_a_page_for_sparse_word_overlap(monkeypatch):
+    from curiosity import autonomy
+    seen=[]
+    monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    def pages(query):return [
+        {'pageid':1,'title':'Fictional Album','extract':'A fictional music album with the same metaphorical words. '*15,'fullurl':'https://en.wikipedia.org/wiki/Album'},
+        {'pageid':2,'title':'Inclined plane','extract':'An inclined plane allows a fictional glass bead to roll under gravity. '*15,'fullurl':'https://en.wikipedia.org/wiki/Incline'}]
+    monkeypatch.setattr(autonomy,'wiki_pages',pages)
+    def scores(question,texts):return [10.0 if 'inclined' in text.lower() else -10.0 for text in texts]
+    monkeypatch.setattr(entailment,'relevance_scores',scores)
+    def links(index):seen.append(index);return [{'url':'https://fixture.edu/article','context':'Inclined plane and fictional glass bead.'}]
+    monkeypatch.setattr(autonomy,'wiki_links',links)
+    monkeypatch.setattr(autonomy,'article',lambda url:{'url':url,'title':'Fictional inclined plane','text':'An inclined plane explains a fictional fixture. '*30})
+    sources,audit=autonomy.research('Why does a fictional glass bead roll?','gravity','fictional glass bead')
+    assert sources[0]['title']=='Inclined plane' and set(seen)=={1,2}
+    assert audit['retrieval_logits_are_not_probabilities'] and audit['retrieval_window_tokens']==512
+    assert all(row['status']!='subject_mismatch_skipped' for row in audit['discovery'])
