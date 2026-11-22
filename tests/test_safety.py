@@ -124,3 +124,21 @@ def test_workflow_has_manual_trigger_no_publication():
     assert trigger['workflow_dispatch']['inputs']['video_count']['default']==1
     assert 'schedule' not in trigger and 'push' not in trigger
     assert obj['jobs']['generate']['timeout-minutes']<=60
+
+
+@pytest.mark.parametrize('privacy',['private','unlisted'])
+def test_nonpublic_youtube_needs_private_repository(privacy):
+    from curiosity.publish import check_repository_privacy
+    with pytest.raises(ValueError):check_repository_privacy(False,privacy)
+    check_repository_privacy(True,privacy)
+
+
+def test_public_youtube_can_use_public_repository():
+    from curiosity.publish import check_repository_privacy
+    check_repository_privacy(False,'public')
+
+
+def test_private_redirect_rejected_before_request(monkeypatch):
+    from curiosity.planner import PublicRedirects
+    with pytest.raises(ValueError):
+        PublicRedirects().redirect_request(None,None,302,'Moved',{},'https://127.0.0.1/private')
