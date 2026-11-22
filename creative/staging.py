@@ -61,23 +61,22 @@ def make_bg2(top=(22, 34, 66), bottom=(10, 16, 36), glow=None, glow_xy=None,
 class KaraokeCap:
     """One-line bottom caption. words: [{start,end,text}]. Renders a cached
     RGBA strip; highlight word index -1 = none."""
-    SIZE = 54
-    Y = 1660
-    MAXW = 940
+    SIZE = 68
+    Y = 1530
+    MAXW = 910
 
     def __init__(self, words):
         self.words = words
         self.f = font(QB, self.SIZE)
         self._cache = {}
-        # chunk into display lines of <=4 words
         self.lines, cur = [], []
-        for i, w in enumerate(words):
+        measure = ImageDraw.Draw(Image.new('RGB',(8,8)))
+        for i,w in enumerate(words):
+            trial = ' '.join(words[j]['text'] for j in cur+[i])
+            if cur and (len(cur)>=4 or measure.textlength(trial,font=self.f)>self.MAXW):
+                self.lines.append(cur); cur=[]
             cur.append(i)
-            trial = " ".join(words[j]["text"] for j in cur)
-            if len(cur) >= 4 or ImageDraw.Draw(Image.new("RGB", (8, 8))).textlength(trial, font=self.f) > self.MAXW:
-                self.lines.append(cur); cur = []
-        if cur:
-            self.lines.append(cur)
+        if cur: self.lines.append(cur)
 
     def span(self, li):
         ws = self.lines[li]
@@ -98,15 +97,17 @@ class KaraokeCap:
         total = sum(widths)
         img = Image.new("RGBA", (int(total) + 60, self.SIZE + 46), (0, 0, 0, 0))
         d = ImageDraw.Draw(img)
+        d.rounded_rectangle((2,5,img.width-2,img.height-5),radius=24,fill=(5,11,25,165))
         x = 30
-        for (t, i), wdt in zip(parts, widths):
-            on = (i == cur_word)
-            col = (255, 214, 90, 255) if on else (255, 255, 255, 235)
-            for ox in (-3, 0, 3):
-                for oy in (-3, 0, 3):
-                    d.text((x + ox, 20 + oy), t, font=f, fill=(8, 12, 28, 200))
-            d.text((x, 20), t, font=f, fill=col)
-            x += wdt
+        for (t,i),wdt in zip(parts,widths):
+            on = i==cur_word
+            if on:
+                d.rounded_rectangle((x-8,12,x+wdt-7,self.SIZE+34),radius=14,fill=(255,211,88,250))
+            col=(12,24,42,255) if on else (247,246,238,255)
+            if not on:
+                d.text((x+2,22),t,font=f,fill=(0,0,0,220))
+            d.text((x,20),t,font=f,fill=col)
+            x+=wdt
         self._cache[key] = img
         return img
 
