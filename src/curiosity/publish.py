@@ -20,6 +20,11 @@ def persist(message):
     git('push','origin','HEAD:main')
 
 
+def check_repository_privacy(is_private, privacy):
+    if not is_private and privacy != 'public':
+        raise ValueError('Make the repository private before private or unlisted uploads. Public repository logs and ledger are visible to others.')
+
+
 def main():
     run=os.environ['SOURCE_RUN_ID']
     episode=os.environ['EPISODE_ID']
@@ -29,6 +34,8 @@ def main():
         raise ValueError('Invalid source run, episode ID or SHA256')
     if os.environ.get('APPROVAL')!='I reviewed this exact video':
         raise ValueError('Explicit exact-video approval is required')
+    repo_info=json.loads(subprocess.run(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}'],capture_output=True,text=True,check=True).stdout)
+    check_repository_privacy(repo_info.get('private') is True,privacy)
     if not os.environ.get('YOUTUBE_TOKEN_JSON'):
         raise ValueError('YouTube OAuth secret is not installed')
     info=json.loads(subprocess.run(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{run}'],capture_output=True,text=True,check=True).stdout)
