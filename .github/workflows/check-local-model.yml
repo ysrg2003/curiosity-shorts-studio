@@ -1,0 +1,35 @@
+name: Inspect local model metadata without inference
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: local-model-metadata
+  cancel-in-progress: false
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Inspect pinned local model, no inference or model-service credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y zstd
+          curl --fail --location --retry 2 https://github.com/ollama/ollama/releases/download/v0.40.17/ollama-linux-amd64.tar.zst -o /tmp/ollama.tar.zst
+          mkdir -p /tmp/ollama
+          tar --zstd -xf /tmp/ollama.tar.zst -C /tmp/ollama
+          /tmp/ollama/bin/ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags; then break; fi
+            sleep 1
+          done
+          /tmp/ollama/bin/ollama pull qwen3:4b-instruct
+          PYTHONPATH=src python -m curiosity.local_ai --inspect-only
