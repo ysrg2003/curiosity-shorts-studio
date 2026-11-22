@@ -23,16 +23,18 @@ Use self.play run_time to fill the requested duration, short pauses, final compo
 def prepare(spec,timeline,bundle,model):
     from paper2video.renderers import manim_r
     from paper2video.types import Scene
+    from .remote_ai import ModelOutputInvalid,ModelRequestFailed,UnexpectedModelCost
     hook=importlib.util.spec_from_file_location('curiosity_upstream_adapter',ROOT/'experiments/upstream_pipeline.py')
     adapter=importlib.util.module_from_spec(hook);hook.loader.exec_module(adapter)
     llm=adapter.LocalModel(model)
     out=Path(bundle)/'generated';out.mkdir(parents=True,exist_ok=True)
-    old_system,old_portrait,old_runner=manim_r.CODEGEN_SYSTEM,manim_r.PORTRAIT_ADDENDUM,manim_r._run_manim
+    old_system,old_portrait,old_runner,old_lint=manim_r.CODEGEN_SYSTEM,manim_r.PORTRAIT_ADDENDUM,manim_r._run_manim,manim_r.lint_manim_code
     # Keep the existing upstream reliability rules; replace its landscape-only safe-area section.
     import re
     manim_r.CODEGEN_SYSTEM=re.sub(r'=== SAFE AREA.*?=== END SAFE AREA ===',PORTRAIT,old_system,flags=re.S)
     manim_r.PORTRAIT_ADDENDUM=PORTRAIT
     manim_r._run_manim=adapter.isolated_manim
+    manim_r.lint_manim_code=lambda code,social_mode=False:old_lint(code,social_mode=social_mode)+adapter.extra_lint(code)
     records={}
     try:
         with scrubbed_subprocesses():
@@ -42,13 +44,13 @@ def prepare(spec,timeline,bundle,model):
                 duration=line['end']-line['start']+0.35
                 scene=Scene(id=line['idx'],narration=line['text'],visual_type='manim',visual_spec={'direction':line['visual_direction'],'elements':line.get('diagram',[])},duration_hint_sec=duration)
                 try:clip=manim_r.render_manim_scene(scene,duration,out,llm,quality='l',max_retries=2,resolution=(1080,1920))
-                except manim_r.ManimRenderError as error:
-                    write_json(out/'failure.json',{'scene':scene.id,'kind':type(error).__name__,'render_or_lint_error':error.stderr,'model_calls':llm.calls});raise
+                except (manim_r.ManimRenderError,ModelOutputInvalid,ModelRequestFailed,UnexpectedModelCost) as error:
+                    write_json(out/'failure.json',{'scene':scene.id,'kind':type(error).__name__,'render_or_lint_error':error.stderr if isinstance(error,manim_r.ManimRenderError) else '', 'response_shape':error.metadata if isinstance(error,(ModelOutputInvalid,ModelRequestFailed)) else {},'model_calls':llm.calls});raise
                 # Make the prepared clip exactly long enough for its existing audio-aligned timeline.
                 target=out/f'beat-{line["idx"]:02d}.mp4'
                 subprocess.run(['ffmpeg','-y','-hide_banner','-loglevel','error','-threads','2','-i',str(clip),'-vf',f'fps=24,tpad=stop_mode=clone:stop_duration={duration},trim=duration={duration},setpts=PTS-STARTPTS','-an','-c:v','libx264','-preset','veryfast','-pix_fmt','yuv420p',str(target)],check=True,timeout=120)
                 records[str(line['idx'])]={'file':target.name,'sha256':digest(target),'duration':duration}
-    finally:manim_r.CODEGEN_SYSTEM,manim_r.PORTRAIT_ADDENDUM,manim_r._run_manim=old_system,old_portrait,old_runner
+    finally:manim_r.CODEGEN_SYSTEM,manim_r.PORTRAIT_ADDENDUM,manim_r._run_manim,manim_r.lint_manim_code=old_system,old_portrait,old_runner,old_lint
     write_json(out/'prepared.json',{'episode_sha256':digest(Path(bundle)/'episode.json'),'timeline_sha256':digest(Path(bundle)/'timeline.json'),'clips':records,'model_calls':llm.calls,'upstream':adapter.UPSTREAM,'revision':adapter.REVISION,'preset_fallback':False,'generated_code_network':'none','generated_code_credentials':'none'})
     return records
 
