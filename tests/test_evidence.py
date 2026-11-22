@@ -43,7 +43,7 @@ def test_relevance_requires_true_boolean_and_observation_mechanism_two_sources(m
     def ask(model,system,prompt,schema,endpoint,seed,effort):
         assert effort=='low'
         ids=list(prompt['sentence_catalog']);first=next(k for k in ids if k.startswith('S0'));second=next(k for k in ids if k.startswith('S1'))
-        return {'supported':True if mode[0]!='string_false' else 'false','observable_quote_ids':[first],'mechanism_quote_ids':[second if mode[0]!='one_source' else first],'issues':[]},{'usage':{'cost':'0'}}
+        return {'source_assessments':[{'source_index':i,'usable':True,'reason':'Synthetic fixture'} for i in range(2)],'supported':True if mode[0]!='string_false' else 'false','observable_quote_ids':[first],'mechanism_quote_ids':[second if mode[0]!='one_source' else first],'issues':[]},{'usage':{'cost':'0'}}
     monkeypatch.setattr(storyboard,'ask',ask)
     assert evidence.screen('Synthetic observation?',sources(),'synthetic')[0]
     mode[0]='one_source';assert not evidence.screen('Synthetic observation?',sources(),'synthetic')[0]
@@ -57,7 +57,7 @@ def test_relevance_rejection_moves_only_to_remaining_model_proposed_candidates(m
     calls=[]
     monkeypatch.setattr(autonomy,'research',lambda *a:(sources(),{'not_a_truth_guarantee':True}))
     def screen(question,*args):
-        calls.append(question);return len(calls)==2,{'accepted':len(calls)==2}
+        calls.append(question);return len(calls)==2,{'accepted':len(calls)==2,'approved_source_indices':[0,1]}
     monkeypatch.setattr(evidence,'screen',screen)
     selected,_,audit=autonomy.select_and_research('synthetic',[])
     assert selected==candidates[1]['question'] and calls==[c['question'] for c in candidates[:2]]
@@ -97,3 +97,47 @@ def test_source_pack_preserves_contiguous_original_text_instead_of_splicing():
     for item in packed:
         assert item['text'] in text and len(item['text'])<=1200
     for entry in evidence.catalog(packed).values():assert entry['quote'] in text
+
+
+def test_source_pack_keeps_document_origin_separate_within_same_budget():
+    from curiosity.storyboard import source_pack
+    opening='Historical account from an earlier scientific era. '
+    text=opening+('Neutral background without the selected mechanism. '*50)+('Synthetic movement follows a clear observable causal process. '*15)
+    source={'url':'https://example.edu/archive','title':'Archive','text':text}
+    packed=source_pack('Synthetic movement',[source,source],budget=2400)
+    for item in packed:
+        assert item['document_opening']==text[:600]
+        assert item['text'] in text and opening not in item['text']
+        assert len(item['text'])+len(item['document_opening'])<=1200
+    assert source['text']==text and 'document_opening' not in source
+
+
+@pytest.mark.parametrize('mode',['flagged_source','duplicate_assessment','missing_assessment','string_usable','issues','unknown_quote'])
+def test_relevance_rejects_inconsistent_source_assessments_and_selected_evidence(monkeypatch,mode):
+    def ask(model,system,prompt,schema,*args,**kwargs):
+        assert schema['properties']['source_assessments']['minItems']==2
+        assessments=[{'source_index':0,'usable':True,'reason':'Synthetic fixture'},{'source_index':1,'usable':True,'reason':'Synthetic fixture'}]
+        result={'source_assessments':assessments,'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]}
+        if mode=='flagged_source':assessments[1]['usable']=False
+        if mode=='duplicate_assessment':assessments[1]['source_index']=0
+        if mode=='missing_assessment':assessments.pop()
+        if mode=='string_usable':assessments[1]['usable']='true'
+        if mode=='issues':result['issues']=['Synthetic remaining issue']
+        if mode=='unknown_quote':result['mechanism_quote_ids']=['unrecognized']
+        return result,{}
+    monkeypatch.setattr(storyboard,'ask',ask)
+    accepted,audit=evidence.screen('Synthetic observation?',sources(),'synthetic')
+    assert not accepted and audit['approved_source_indices']==[]
+
+
+def test_valid_source_subset_excludes_unusable_pool_records_before_drafting(monkeypatch):
+    from curiosity import autonomy
+    pool=sources()+[{'url':'https://example.net/history','text':'A synthetic historical account describes an obsolete fictional theory without asserting current facts.'}]
+    monkeypatch.setattr(autonomy,'questions',lambda *args:([{'question':'Synthetic observation?','search_terms':'synthetic mechanism'}],{}))
+    monkeypatch.setattr(autonomy,'research',lambda *args:(pool,{}))
+    def ask(model,system,prompt,schema,*args,**kwargs):
+        return {'source_assessments':[{'source_index':i,'usable':i<2,'reason':'Synthetic fixture'} for i in range(3)],'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]},{}
+    monkeypatch.setattr(storyboard,'ask',ask)
+    selected,approved,audit=autonomy.select_and_research('synthetic',[])
+    assert selected=='Synthetic observation?' and approved==pool[:2] and len(pool)==3
+    assert audit['research']['relevance']['approved_source_indices']==[0,1]
