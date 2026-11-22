@@ -25,9 +25,9 @@ def generate():
         from .autonomy import select_and_research,ResearchUnavailable
         if os.environ.get('CURIOSITY_LLM_BACKEND')=='openrouter-free':
             from .remote_ai import free_quota_status
-            quota=free_quota_status(minimum_requests=26*count)
+            quota=free_quota_status(minimum_requests=29*count)
             (ROOT/'drafts').mkdir(parents=True,exist_ok=True)
-            write_json(ROOT/'drafts/quota-budget.json',{**quota,'video_count':count,'rule':'conservative maximum 26 inference requests per automatic video; availability can still change'})
+            write_json(ROOT/'drafts/quota-budget.json',{**quota,'video_count':count,'rule':'conservative maximum 29 inference requests per automatic video; availability can still change'})
             if quota['http_status']!=200 or quota['request_budget']!='sufficient_for_bounded_attempt':
                 raise RuntimeError('Request budget is unavailable or below the conservative reserve. No inference attempted.')
         topic=os.environ.get('TOPIC','Why do we get goosebumps?').strip()
