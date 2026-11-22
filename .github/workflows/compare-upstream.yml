@@ -1,0 +1,82 @@
+name: Compare complete upstream animation pipeline
+on:
+  workflow_dispatch:
+    inputs:
+      video_count:
+        description: Bounded cross-topic benchmark count, not final production acceptance
+        type: number
+        default: 1
+      source_urls:
+        description: Public HTTPS source articles, separated by spaces, one per video
+        type: string
+        default: https://science.nasa.gov/moon/moon-phases/ https://openstax.org/books/organic-chemistry/pages/27-2-soap
+      model:
+        description: Local coding model, no paid inference endpoint
+        type: choice
+        options: ['qwen2.5-coder:7b', 'qwen2.5-coder:1.5b']
+        default: 'qwen2.5-coder:7b'
+permissions:
+  contents: read
+concurrency:
+  group: upstream-animation-comparison
+  cancel-in-progress: false
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      VIDEO_COUNT: ${{ inputs.video_count }}
+      SOURCE_URLS: ${{ inputs.source_urls }}
+      MODEL: ${{ inputs.model }}
+      OMP_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install complete upstream pipeline and local speech adapters
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg espeak-ng zstd
+          python -m pip install -e '.[test,local-voice]' 'paper2video @ git+https://github.com/edwardyen724-g/paper2video@c713646c47d5ab3fc1085f733800750cfa235596'
+          python -m pytest -q
+      - name: Build isolated CPU renderer, no generated code in host process
+        run: docker build -t curiosity-upstream-manim:0.20.1 -f experiments/Dockerfile.manim .
+      - name: Start free local model and run original pipeline across source articles
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 https://github.com/ollama/ollama/releases/download/v0.40.17/ollama-linux-amd64.tar.zst -o /tmp/ollama.tar.zst
+          mkdir -p /tmp/ollama
+          tar --zstd -xf /tmp/ollama.tar.zst -C /tmp/ollama
+          /tmp/ollama/bin/ollama serve > /tmp/ollama.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/tmp/ollama-stop.log || true' EXIT
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags; then break; fi
+            sleep 1
+          done
+          /tmp/ollama/bin/ollama pull "$MODEL"
+          python - <<'PY'
+          import os,runpy,sys
+          urls=os.environ['SOURCE_URLS'].split()
+          sys.argv=['upstream_pipeline','--count',os.environ['VIDEO_COUNT'],'--model',os.environ['MODEL']]
+          for url in urls:sys.argv+=['--source',url]
+          runpy.run_path('experiments/upstream_pipeline.py',run_name='__main__')
+          PY
+      - name: Retain real comparison outputs, no tokens or full article archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: upstream-animation-comparison
+          path: |
+            output/upstream/**/video.mp4
+            output/upstream/**/script.json
+            output/upstream/**/benchmark.json
+            output/upstream/**/pipeline.log
+            output/upstream/**/manim/**/scene_*.py
+            output/upstream/batch.json
+          retention-days: 1
+          if-no-files-found: warn
