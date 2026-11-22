@@ -10,15 +10,20 @@ on:
         description: Public HTTPS source articles, separated by spaces, one per video
         type: string
         default: https://science.nasa.gov/moon/moon-phases/ https://openstax.org/books/organic-chemistry/pages/27-2-soap
+      backend:
+        description: Free-only OpenRouter needs OPENROUTER_API_KEY; local uses CPU
+        type: choice
+        options: [ollama, openrouter-free]
+        default: openrouter-free
       model:
-        description: Local coding model, no paid inference endpoint
+        description: Coding model for the local backend only
         type: choice
         options: ['qwen2.5-coder:7b', 'qwen2.5-coder:1.5b']
         default: 'qwen2.5-coder:7b'
 permissions:
   contents: read
 concurrency:
-  group: upstream-animation-comparison
+  group: upstream-animation-comparison-${{ inputs.backend }}
   cancel-in-progress: false
 jobs:
   compare:
@@ -28,6 +33,7 @@ jobs:
       VIDEO_COUNT: ${{ inputs.video_count }}
       SOURCE_URLS: ${{ inputs.source_urls }}
       MODEL: ${{ inputs.model }}
+      CURIOSITY_LLM_BACKEND: ${{ inputs.backend }}
       OMP_NUM_THREADS: '2'
     steps:
       - uses: actions/checkout@v4
@@ -36,15 +42,16 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install complete upstream pipeline and local speech adapters
+      - name: Install complete upstream pipeline and owner provider adapter
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg espeak-ng zstd
-          python -m pip install -e '.[test,local-voice]' 'paper2video @ git+https://github.com/edwardyen724-g/paper2video@c713646c47d5ab3fc1085f733800750cfa235596'
+          python -m pip install -e '.[test,local-voice,free-ai,research]' 'paper2video @ git+https://github.com/edwardyen724-g/paper2video@c713646c47d5ab3fc1085f733800750cfa235596'
           python -m pytest -q
       - name: Build isolated CPU renderer, no generated code in host process
         run: docker build -t curiosity-upstream-manim:0.20.1 -f experiments/Dockerfile.manim .
-      - name: Start free local model and run original pipeline across source articles
+      - name: Start local model only when selected
+        if: inputs.backend == 'ollama'
         shell: bash
         run: |
           set -euo pipefail
@@ -52,13 +59,15 @@ jobs:
           mkdir -p /tmp/ollama
           tar --zstd -xf /tmp/ollama.tar.zst -C /tmp/ollama
           /tmp/ollama/bin/ollama serve > /tmp/ollama.log 2>&1 &
-          server=$!
-          trap 'kill "$server" 2>/tmp/ollama-stop.log || true' EXIT
           for i in $(seq 1 60); do
             if curl --fail --silent http://127.0.0.1:11434/api/tags; then break; fi
             sleep 1
           done
           /tmp/ollama/bin/ollama pull "$MODEL"
+      - name: Run original pipeline across source articles, no upload
+        env:
+          OPENROUTER_API_KEY: ${{ inputs.backend == 'openrouter-free' && secrets.OPENROUTER_API_KEY || '' }}
+        run: |
           python - <<'PY'
           import os,runpy,sys
           urls=os.environ['SOURCE_URLS'].split()
@@ -76,6 +85,8 @@ jobs:
             output/upstream/**/script.json
             output/upstream/**/benchmark.json
             output/upstream/**/pipeline.log
+            output/upstream/**/failure.json
+            output/upstream/**/manim/scene_*.mp4
             output/upstream/**/manim/**/scene_*.py
             output/upstream/batch.json
           retention-days: 1
