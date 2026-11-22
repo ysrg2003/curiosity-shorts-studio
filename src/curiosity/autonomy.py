@@ -1,8 +1,9 @@
 """No-input topic hypotheses and keyless research. Discovery is not truth certification."""
 import hashlib
 import re
-from urllib.parse import urlencode,urlparse
-from .planner import fetch,public_url
+from urllib.parse import urlencode,urlparse,parse_qs
+from html.parser import HTMLParser
+from .planner import fetch,public_url,source_bytes,source_error,SourceValidationError
 from .storyboard import ask
 
 PUBLISHERS=('nasa.gov','noaa.gov','usgs.gov','nih.gov','nsf.gov','science.org','nature.com','scientificamerican.com','openstax.org','esa.int','metoffice.gov.uk','sciencefocus.com','britannica.com')
@@ -16,6 +17,7 @@ def publisher(url):
 
 def eligible_reference(url):
     p=urlparse(url);host=(p.hostname or '').lower()
+    if p.path.rstrip('/').lower().split('/')[-1] in {'search','query','query.fcgi','entrez'} or set(parse_qs(p.query)) & {'q','query','search','term'}:return False
     return p.scheme=='https' and (host.endswith('.edu') or any(host==root or host.endswith('.'+root) for root in PUBLISHERS))
 
 
@@ -51,26 +53,64 @@ class ResearchUnavailable(ValueError):
 
 
 def wiki_pages(query):
-    params=urlencode({'action':'query','generator':'search','gsrsearch':query,'gsrlimit':3,'prop':'extracts|info','explaintext':1,'exintro':1,'inprop':'url','format':'json'})
+    params=urlencode({'action':'query','generator':'search','gsrsearch':query,'gsrlimit':3,'prop':'extracts|info','explaintext':1,'exintro':1,'inprop':'url','maxlag':5,'format':'json'})
     data=fetch('https://en.wikipedia.org/w/api.php?'+params)
     return sorted(data.get('query',{}).get('pages',{}).values(),key=lambda page:page.get('index',999))
 
 
+class CitationLinks(HTMLParser):
+    """Read citation context, not bare URL ordering. Context remains untrusted data."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.items=[];self.depth=0;self.urls=[];self.parts=[]
+    def handle_starttag(self,tag,attrs):
+        attrs=dict(attrs)
+        if tag=='li':
+            if self.depth:self.depth+=1
+            elif attrs.get('id','').startswith('cite_note'):
+                self.depth=1;self.urls=[];self.parts=[]
+        if self.depth and tag=='a':
+            href=attrs.get('href','')
+            if href.startswith(('https://','http://')):self.urls.append(href)
+    def handle_data(self,data):
+        if self.depth:self.parts.append(data)
+    def handle_endtag(self,tag):
+        if tag=='li' and self.depth:
+            self.depth-=1
+            if not self.depth:
+                context=re.sub(r'\s+',' ',' '.join(self.parts)).strip()[:1200]
+                self.items.extend({'url':url,'context':context} for url in dict.fromkeys(self.urls))
+
+
 def wiki_links(page_id):
-    links=[];continuation={}
-    for _ in range(2):
-        params={'action':'query','pageids':str(page_id),'prop':'extlinks','ellimit':100,'format':'json',**continuation}
-        data=fetch('https://en.wikipedia.org/w/api.php?'+urlencode(params))
-        for page in data.get('query',{}).get('pages',{}).values():links.extend(page.get('extlinks',[]))
-        following=data.get('continue',{})
-        if 'elcontinue' not in following:break
-        continuation={key:following[key] for key in ('continue','elcontinue') if key in following}
-    return links
+    params={'action':'parse','pageid':str(page_id),'prop':'text','disableeditsection':1,
+            'disablelimitreport':1,'maxlag':5,'format':'json','formatversion':2}
+    data=fetch('https://en.wikipedia.org/w/api.php?'+urlencode(params))
+    text=data.get('parse',{}).get('text','')
+    if isinstance(text,dict):text=text.get('*','')
+    parser=CitationLinks();parser.feed(text)
+    return parser.items
+
+
+def rank_references(links,question,terms):
+    # Retrieval relevance is not a scientific verdict. Ties preserve citation order.
+    filler={'what','when','where','which','does','that','this','with','from','have','about','they','their','into','would','could','should'}
+    def words(text):return {w.rstrip('s') for w in re.findall(r'[a-z]{4,}',text.lower()) if w not in filler}
+    target=words(question+' '+terms)
+    scored=[];seen=set()
+    for item in links:
+        url=item.get('url',item.get('*',''))
+        if url.startswith('http://'):url='https://'+url[7:]
+        if not eligible_reference(url) or url in seen:continue
+        seen.add(url)
+        score=len(target & words(item.get('context','')+' '+urlparse(url).path))
+        scored.append((score,url))
+    return [url for score,url in sorted(scored,key=lambda row:-row[0])]
 
 
 def document_resolution(requested,final,is_pdf):
-    if urlparse(requested).path.lower().endswith('.pdf') and not is_pdf:raise ValueError('PDF reference resolved to a non-PDF page')
-    if not is_pdf and urlparse(final).path.rstrip('/')=='':raise ValueError('Reference resolved to a generic website root, not an article')
+    if urlparse(requested).path.lower().endswith('.pdf') and not is_pdf:raise SourceValidationError('pdf_resolved_to_html','PDF reference resolved to a non-PDF page')
+    if not is_pdf and urlparse(final).path.rstrip('/')=='':raise SourceValidationError('generic_website_root','Reference resolved to a generic website root, not an article')
 
 
 def research(question,terms):
@@ -83,7 +123,11 @@ def research(question,terms):
     for query in queries:
         try:pages=wiki_pages(query)
         except (ValueError,OSError) as error:
-            discovery.append({'query':query,'status':'unavailable','error_type':type(error).__name__});pools.append([]);continue
+            details=source_error(error)
+            discovery.append({'query':query,'status':'unavailable','error_type':type(error).__name__,'transport':details})
+            if details.get('provider')=='wikimedia' and details.get('provider_stop'):
+                raise ResearchUnavailable('Discovery provider requested a stop. No further candidate requests or media.',{**report(),'provider_pause':details}) from None
+            pools.append([]);continue
         discovery.append({'query':query,'status':'retrieved','page_titles':[page.get('title','') for page in pages]})
         pools.append(pages)
     for pages in pools:
@@ -100,12 +144,13 @@ def research(question,terms):
             seen_pages.add(page_id)
             try:links=wiki_links(page_id)
             except (ValueError,OSError) as error:
-                discovery.append({'page_id':page_id,'status':'references_unavailable','error_type':type(error).__name__});continue
-            urls=[]
-            for item in links:
-                url=item.get('*',item.get('url',''))
-                if url.startswith('http://'):url='https://'+url[7:]
-                if eligible_reference(url):urls.append(url)
+                details=source_error(error)
+                discovery.append({'page_id':page_id,'status':'references_unavailable','error_type':type(error).__name__,'transport':details})
+                if details.get('provider')=='wikimedia' and details.get('provider_stop'):
+                    raise ResearchUnavailable('Discovery provider requested a stop. No further candidate requests or media.',{**report(),'provider_pause':details}) from None
+                continue
+            urls=rank_references(links,question,terms)
+            discovery.append({'page_id':page_id,'status':'references_ranked','citation_links':len(links),'eligible_unique_links':len(urls),'ranking_is_not_truth_verification':True})
             queues.append({'page_id':page_id,'query':queries[query_index],'urls':urls,'attempts':0})
     while len(attempted)<10 and any(item['urls'] and item['attempts']<6 for item in queues):
         for queue in queues:
@@ -123,7 +168,7 @@ def research(question,terms):
                     record['status']='ineligible_or_duplicate_resolved_publisher';continue
                 sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'])
             except Exception as error:
-                record.update(status='unreadable',error_type=type(error).__name__);continue
+                record.update(status='unreadable',error_type=type(error).__name__,transport=source_error(error));continue
             if len(groups)>=4:return sources,report()
     if len(groups)>=2:return sources,report()
     raise ResearchUnavailable('No two readable publisher groups from live research. No unsupported fallback or video.',report())
@@ -131,29 +176,24 @@ def research(question,terms):
 
 def article(url):
     # Reuse the public-source safety checks, then the Apache-licensed Trafilatura extractor.
-    from urllib.request import Request,build_opener
-    from .planner import PublicRedirects,USER_AGENT
     import trafilatura
-    public_url(url)
-    with build_opener(PublicRedirects()).open(Request(url,headers={'User-Agent':USER_AGENT}),timeout=25) as response:
-        final=public_url(response.url);raw=response.read(2_000_001)
-        if len(raw)>2_000_000:raise ValueError('Source exceeds2MB')
+    final,raw,_=source_bytes(url)
     document_resolution(url,final,raw.startswith(b'%PDF'))
     if raw.startswith(b'%PDF'):
         from io import BytesIO
         from pypdf import PdfReader
         reader=PdfReader(BytesIO(raw))
-        if len(reader.pages)>40:raise ValueError('Source PDF exceeds40pages')
+        if len(reader.pages)>40:raise SourceValidationError('pdf_page_limit','Source PDF exceeds40pages')
         text='\n'.join(page.extract_text() or '' for page in reader.pages)
         data={'text':text,'title':str((reader.metadata or {}).get('/Title') or '')}
         method='pypdf'
     else:
         doc=trafilatura.bare_extraction(raw,url=final,include_comments=False,include_tables=False,with_metadata=True)
-        if not doc:raise ValueError('No readable article')
+        if not doc:raise SourceValidationError('no_readable_article','No readable article')
         data=doc.as_dict() if hasattr(doc,'as_dict') else dict(doc)
         method='trafilatura'
     text=re.sub(r'\s+',' ',data.get('text') or '').strip()
-    if len(text)<700:raise ValueError('Article too short for source checks')
+    if len(text)<700:raise SourceValidationError('article_too_short','Article too short for source checks')
     return {'url':final,'requested_url':url,'title':data.get('title') or '', 'text':text[:18000],
             'publisher':publisher(final),'extraction_method':method,'text_sha256':hashlib.sha256(text.encode()).hexdigest()}
 
@@ -179,4 +219,6 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
                 details={'model_contract':details,'research':report}
             else:status='research_unavailable'
             audit.append({'question':item['question'],'status':status,'error_type':type(error).__name__,'details':details})
+            if details.get('provider_pause'):
+                raise ResearchUnavailable('Public discovery provider requested a stop. No further candidate requests, script or media.',{'selection':stats,'candidates':candidates,'rejections':audit,'provider_pause':details['provider_pause']}) from None
     raise ResearchUnavailable('No automatic candidate completed topic/source acceptance. Inspect failure stages; a contract failure is not a scientific evidence rejection. No video created.',{'selection':stats,'candidates':candidates,'rejections':audit})
