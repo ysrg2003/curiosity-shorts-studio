@@ -120,7 +120,8 @@ def draft(topic, target, source_urls=None, model='qwen3:4b', endpoint='http://12
         write_json(target.with_suffix('.audit.json'),{'attempts':audit,'accepted':False})
         raise ValueError('Local draft did not meet source/story checks after 3 attempts. No video or upload created for this draft. See audit.')
     import os
-    selected_model='openrouter/free' if os.environ.get('CURIOSITY_LLM_BACKEND')=='openrouter-free' else model
+    from .remote_ai import MODEL
+    selected_model=MODEL if os.environ.get('CURIOSITY_LLM_BACKEND')=='openrouter-free' else model
     obj.update(visual_engine='generated-manim',schema_version=1,id=re.sub(r'[^a-z0-9]+','-',topic.lower()).strip('-')[:65]+f'-{index}',renderer='generic',language='en',
                sources=[x['url'] for x in packed],science_reviewed=False,
                generator={'model':selected_model,'source_alignment':'evidence-checked-draft','human_review_still_needed':True})
