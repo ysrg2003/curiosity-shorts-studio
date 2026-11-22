@@ -269,3 +269,33 @@ def test_live_catalog_guard_requires_zero_price_and_explicit_reasoning_off_suppo
     with pytest.raises(ValueError,match='reasoning-off'):remote_ai.check_free_catalog()
     model['reasoning']['mandatory']=False;model['supported_parameters']=[]
     with pytest.raises(ValueError,match='structured output'):remote_ai.check_free_catalog()
+
+
+def test_quota_read_never_infers_or_exposes_key_labels_counts_or_account_details(monkeypatch):
+    import requests
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-private-secret')
+    monkeypatch.setattr(requests,'post',lambda *a,**k:pytest.fail('Quota check must never infer'))
+    counter={'remaining':0}
+    calls=[]
+    def get(url,**kwargs):
+        calls.append((url,kwargs))
+        return SimpleNamespace(status_code=200,json=lambda:{'data':{'label':'synthetic-private-label','organization_id':'synthetic-private-org','free_model_daily_requests':counter,'usage_daily':91.23}})
+    monkeypatch.setattr(requests,'get',get)
+    result=remote_ai.free_quota_status()
+    assert result=={'http_status':200,'daily_counter':'at_limit','inference_performed':False}
+    counter['remaining']=12
+    assert remote_ai.free_quota_status()['daily_counter']=='has_remaining'
+    counter['remaining']=True
+    assert remote_ai.free_quota_status()['daily_counter']=='unknown'
+    assert all(url=='https://openrouter.ai/api/v1/key' and kwargs['allow_redirects'] is False for url,kwargs in calls)
+    assert not any(value in str(result) for value in ['synthetic-private', '91.23', 'remaining'])
+
+def test_quota_read_failure_is_sanitized_and_never_retried(monkeypatch):
+    import requests
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-private-secret')
+    calls=[]
+    def fail(*a,**k):
+        calls.append(True);raise RuntimeError('synthetic-private-sensitive-error')
+    monkeypatch.setattr(requests,'get',fail)
+    assert remote_ai.free_quota_status()=={'http_status':'unavailable','daily_counter':'unknown','inference_performed':False}
+    assert len(calls)==1
