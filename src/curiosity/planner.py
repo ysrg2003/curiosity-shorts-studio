@@ -112,7 +112,8 @@ def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='
         try:raw,stats=ask(model,draft_system,{'topic':topic,'variation':index,'sources':packed,'sentence_catalog':sentences,'layout':prompt_layout(),'revision_feedback':feedback},drafting_schema(sentences),endpoint,42+index+attempt)
         except ModelOutputInvalid as error:
             audit.append({'attempt':attempt+1,'rejected':'incomplete_or_schema_invalid_model_output','response_shape':error.metadata})
-            feedback=['Return one complete valid JSON object matching every requested field and type. No preamble. Do not truncate the script.']
+            from .storyboard import revision_feedback
+            feedback=[revision_feedback(error.metadata)]
             continue
         write_json(target.with_suffix(f'.attempt-{attempt+1}.json'),{'diagnostic_only':True,'not_a_verified_episode':True,'model_output':raw})
         try:obj=materialize(raw,sentences)
