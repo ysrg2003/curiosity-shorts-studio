@@ -153,6 +153,7 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
             relevant,relevance=screen(item['question'],source_pack(item['question'],sources),model,endpoint)
             report['relevance']=relevance
             if not relevant:raise ResearchUnavailable('Readable sources did not directly support the exact question and mechanism.',{'research':report})
-            return item['question'],sources,{'selection':stats,'candidates':candidates,'rejections':audit,'research':report,'operator_topic_or_source_input':False}
+            approved=[sources[index] for index in relevance['approved_source_indices']]
+            return item['question'],approved,{'selection':stats,'candidates':candidates,'rejections':audit,'research':report,'operator_topic_or_source_input':False}
         except (ValueError,OSError) as error:audit.append({'question':item['question'],'status':'research_unavailable','error_type':type(error).__name__,'details':error.metadata if isinstance(error,ModelOutputInvalid) else getattr(error,'diagnostics',{})})
     raise ResearchUnavailable('All automatic topic candidates lacked sufficient retrieved evidence. No video created.',{'selection':stats,'candidates':candidates,'rejections':audit})
