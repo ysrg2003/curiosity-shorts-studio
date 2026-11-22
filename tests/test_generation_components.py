@@ -340,7 +340,7 @@ def test_topic_proposal_bounds_reject_and_audit_without_inventing_candidates(mon
 def test_topic_proposal_retry_recovers_only_from_model_supplied_valid_candidates(monkeypatch):
     from curiosity import autonomy
     calls=[]
-    candidates=[{'question':f'What moves synthetic fixture {i}?','search_terms':'synthetic vector motion'} for i in range(3)]
+    candidates=[{'question':f'What moves synthetic fixture {i}?','search_terms':'synthetic vector motion','subject_query':'synthetic fixture'} for i in range(3)]
     def ask(*args):
         calls.append(True)
         if len(calls)==1:raise remote_ai.ModelOutputInvalid({'finish_reason':'length'})
