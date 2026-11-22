@@ -129,3 +129,10 @@ Numeric PubMed references use the documented Europe PMC publication-record API i
 
 API reference: https://europepmc.org/RestfulWebService
 Search reference: https://www.mediawiki.org/wiki/Help:CirrusSearch
+
+
+## Discovery relevance before article reads
+
+The automatic research path now filters discovery pages and citation contexts for the model-supplied subject before requesting reference articles. This is a lexical retrieval filter, not topic/science approval. It reuses pinned `rank-bm25==0.2.2` (BM25L) and `snowballstemmer==3.1.1` for consistent inflection handling and collection-relative ranking, instead of only counting title substrings or giving unrelated query pools equal turns. All queries are still discovered before reference reads. The same ten overall and six per-page article-request limits remain. A relevant-sounding page or a high retrieval score cannot bypass the complete source-answer, independent NLI, narration or story gates. Lexical filtering can miss paraphrases; no unlimited-recall claim is made.
+
+Every completed source assessment retains the exact original sentences selected by its generated verdict, their IDs/source indices and source-excerpt hashes, including failed evidence checks. These are explicitly unapproved diagnostic selections, not accepted facts. This permits auditing the independent evidence rejection without trying to reconstruct a later revision of a web page. No failed answer or selected quote is silently rewritten.
