@@ -132,3 +132,22 @@ def request(prompt,system,schema=None,json_mode=False):
             if not Draft202012Validator(strict_schema(schema)).is_valid(output):raise ModelOutputInvalid(shape)
     else:output=output['text']
     return output,{'backend':'openrouter-free','model':MODEL,'usage':usage,'paid_fallback_allowed':False,'response_shape':shape,'complete_json_extracted':extracted}
+
+
+def free_quota_status():
+    """Read only the documented current-key daily counter; never retain labels or account details."""
+    key=os.environ.get('OPENROUTER_API_KEY','').strip()
+    if not key:raise ValueError('Missing OPENROUTER_API_KEY Actions secret. No request sent.')
+    import requests
+    try:
+        response=requests.get('https://openrouter.ai/api/v1/key',headers={'Authorization':f'Bearer {key}'},timeout=25,allow_redirects=False)
+        status=int(response.status_code)
+        result={'http_status':status,'daily_counter':'unknown','inference_performed':False}
+        if status!=200:return result
+        data=response.json().get('data',{})
+        counter=data.get('free_model_daily_requests') or {}
+        remaining=counter.get('remaining')
+        if type(remaining) is int:result['daily_counter']='at_limit' if remaining<=0 else 'has_remaining'
+        return result
+    except Exception:
+        return {'http_status':'unavailable','daily_counter':'unknown','inference_performed':False}
