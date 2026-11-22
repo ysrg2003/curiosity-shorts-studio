@@ -3,34 +3,39 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Starter visual-parity pack or newly researched topic
+        description: Starter pack, supplied topic, or automatic topic and research
         type: choice
-        options: [starter, new-topic]
-        default: starter
+        options: [starter, new-topic, automatic]
+        default: automatic
       video_count:
-        description: Number of complete videos, check free allowance before increasing
+        description: Number of complete videos, resource and free-service limits apply
         type: number
         default: 1
+      backend:
+        description: Free-only OpenRouter needs OPENROUTER_API_KEY; local uses CPU
+        type: choice
+        options: [ollama, openrouter-free]
+        default: openrouter-free
       voice:
-        description: Kokoro runs locally; Edge attempts original online voices
+        description: Kokoro local voice or optional online Edge voice
         type: choice
         options: [kokoro, edge]
         default: kokoro
       topic:
-        description: New-topic subject, one subject per line for a batch
+        description: Supplied topics, ignored in automatic mode
         type: string
         default: Why do we get goosebumps?
       source_urls:
-        description: Optional readable HTTPS source URLs, one per line
+        description: Optional supplied HTTPS sources, ignored in automatic mode
         type: string
         required: false
       episode:
-        description: Starter pack
+        description: Starter pack only
         type: choice
         options: [stomach-growl, brain-freeze, dizziness, onion-tears, hiccups]
         default: stomach-growl
 permissions:
-  contents: write
+  contents: read
 concurrency:
   group: curiosity-generate
   cancel-in-progress: false
@@ -45,45 +50,39 @@ jobs:
       TOPIC: ${{ inputs.topic }}
       SOURCE_URLS: ${{ inputs.source_urls }}
       EPISODE: ${{ inputs.episode }}
+      CURIOSITY_LLM_BACKEND: ${{ inputs.backend }}
       OMP_NUM_THREADS: '2'
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-      - name: Expand initial source delivery, if present
-        shell: bash
-        run: |
-          if [ -f source.b64 ]; then base64 --decode source.b64 > curiosity-source.tar.gz; fi
-          bundle=$(find . -maxdepth 1 -name '*curiosity-source.tar.gz' -print -quit)
-          if [ -n "$bundle" ]; then
-            tar -xzf "$bundle"
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add src creative episodes tests docs pyproject.toml studio.json README.md .gitignore
-            if [ -f source.b64 ]; then git rm source.b64; fi
-            if ! git diff --cached --quiet; then
-              git commit -m 'Expand standalone studio source'
-              git push
-            fi
-          fi
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install free rendering and voice dependencies
+      - name: Install free rendering, research and owner model adapter
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg espeak-ng zstd
-          python -m pip install -e '.[test,local-voice]'
-          if [ "$MODE" = new-topic ]; then
+          python -m pip install -e '.[test,local-voice,research,free-ai]'
+          if [ "$MODE" != starter ]; then
             sudo apt-get install -y libcairo2-dev libpango1.0-dev pkg-config
-            python -m pip install -e '.[motion]'
+            python -m pip install -e '.[motion,generated-motion]'
           fi
+      - name: Build generated-code sandbox when needed
+        if: inputs.mode != 'starter'
+        run: docker build -t curiosity-upstream-manim:0.20.1 -f experiments/Dockerfile.manim .
+      - uses: actions/cache@v4
+        with:
+          path: .state/topics.json
+          key: generated-topics-${{ github.run_id }}
+          restore-keys: generated-topics-
       - name: Unit and safety checks
         run: python -m pytest -q
-      - name: Start local drafting model, new-topic mode only
-        if: inputs.mode == 'new-topic'
+      - name: Start local drafting model only when selected
+        if: inputs.mode != 'starter' && inputs.backend == 'ollama'
         shell: bash
         run: |
+          set -euo pipefail
           curl --fail --location --retry 2 https://github.com/ollama/ollama/releases/download/v0.40.17/ollama-linux-amd64.tar.zst -o /tmp/ollama.tar.zst
           mkdir -p /tmp/ollama
           tar --zstd -xf /tmp/ollama.tar.zst -C /tmp/ollama
@@ -93,9 +92,11 @@ jobs:
             sleep 1
           done
           /tmp/ollama/bin/ollama pull qwen3:4b
-      - name: Produce complete video count, no YouTube upload
+      - name: Trusted topic, research and script inference; credential-free media children
+        env:
+          OPENROUTER_API_KEY: ${{ inputs.mode != 'starter' && inputs.backend == 'openrouter-free' && secrets.OPENROUTER_API_KEY || '' }}
         run: python -m curiosity.batch
-      - name: Retain reviewable deliverables, not model caches or tokens
+      - name: Retain reviewable deliverables, never credentials or model caches
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -110,6 +111,10 @@ jobs:
             output/**/timeline.json
             output/batch.json
             output/generation.json
+            output/**/generated/prepared.json
+            output/**/generated/failure.json
+            output/**/generated/**/scene_*.py
+            .state/topics.json
             drafts/*.json
           retention-days: 1
           if-no-files-found: warn
