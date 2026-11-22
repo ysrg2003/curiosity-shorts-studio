@@ -42,7 +42,7 @@ concurrency:
 jobs:
   generate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 50
+    timeout-minutes: 90
     env:
       VIDEO_COUNT: ${{ inputs.video_count }}
       MODE: ${{ inputs.mode }}
