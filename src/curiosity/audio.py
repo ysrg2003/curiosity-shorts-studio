@@ -1,6 +1,7 @@
 """Speech adapters. Edge keeps the original voices; Kokoro is a local alternative."""
 import asyncio
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -41,17 +42,23 @@ async def edge_line(text, speaker, path):
 def kokoro_line(text, speaker, path, pipeline):
     import soundfile as sf
     voice = 'af_sky' if speaker == 'PIP' else 'am_michael'
-    audio, sample_rate = pipeline.create(text, voice=voice, speed=1.04 if speaker == 'PIP' else 1.0, lang='en-us')
+    from .alignment import align_words
+    sound = re.match(r'^(G[rR]+[kK]?[.!]*)\s+',text)
+    spoken = text[sound.end():] if sound else text
+    audio, sample_rate, phonemes = pipeline.create_timed(spoken, voice=voice, speed=1.04 if speaker == 'PIP' else 1.0, lang='en-us')
+    if not phonemes:
+        raise ValueError('This voice model has no duration output; model-backed timing is unavailable')
+    cues, coverage = align_words(spoken,phonemes,pipeline.tokenizer)
+    if sound:
+        import numpy as np
+        t=np.arange(round(sample_rate*0.48))/sample_rate
+        noise=np.random.default_rng(42).normal(size=len(t))
+        noise=np.convolve(noise,np.ones(100)/100,mode='same')
+        effect=(np.sin(2*np.pi*(105*t-30*t*t))*(0.5+0.5*np.sin(2*np.pi*8*t))+0.5*noise)*0.17*np.sin(np.pi*t/0.48)**2
+        pad=np.concatenate([effect,np.zeros(round(sample_rate*0.10))]).astype(audio.dtype)
+        audio=np.concatenate([pad,audio]);offset=len(pad)/sample_rate
+        cues=[{'text':sound.group(1),'start':0.0,'end':0.48,'kind':'sound-effect'}]+[{**c,'start':c['start']+offset,'end':c['end']+offset} for c in cues]
     sf.write(str(path), audio, sample_rate)
-    # These are estimates, explicitly labelled. Exact service boundaries are used in Edge mode.
-    tokens = text.split()
-    total = len(audio)/sample_rate
-    weight = sum(max(1, len(t)) for t in tokens)
-    cues, t = [], 0.0
-    for word in tokens:
-        end = t + total*max(1, len(word))/weight
-        cues.append({'text': word, 'start': t, 'end': end})
-        t = end
     return cues
 
 
@@ -69,7 +76,7 @@ async def generate(spec, out, engine='edge'):
     for i, ln in enumerate(spec['lines']):
         path = audio_dir / f'line{i:02d}.{ "mp3" if engine == "edge" else "wav" }'
         # Cache only audio whose text, voice and engine match.
-        key = json.dumps([ln['text'], ln['speaker'], engine, VOICES], sort_keys=True)
+        key = json.dumps([ln['text'], ln['speaker'], engine, VOICES, 'duration-alignment-v3'], sort_keys=True)
         cache = path.with_suffix('.json')
         if path.exists() and cache.exists() and json.loads(cache.read_text()).get('key') == key:
             cues = json.loads(cache.read_text())['cues']
@@ -77,10 +84,17 @@ async def generate(spec, out, engine='edge'):
             cues = await edge_line(ln['text'], ln['speaker'], path) if engine == 'edge' else kokoro_line(ln['text'], ln['speaker'], path, pipeline)
             cache.write_text(json.dumps({'key': key, 'cues': cues}))
         d = duration(path)
-        lines.append({**ln, 'idx': i, 'start': t, 'end': t+d, 'audio': str(path.relative_to(out)),
+        import soundfile as sf
+        from .alignment import envelope
+        waveform, sample_rate = sf.read(str(path))
+        mouth = envelope(waveform,sample_rate)
+        for c in cues:
+            if c.get('kind')=='sound-effect':
+                for j in range(int(c['start']*40),min(len(mouth),int(c['end']*40)+1)):mouth[j]=0.0
+        lines.append({**ln, 'mouth_envelope':mouth,'mouth_hz':40, 'idx': i, 'start': t, 'end': t+d, 'audio': str(path.relative_to(out)),
                       'words': [{**c, 'start': t+c['start'], 'end': t+c['end']} for c in cues]})
         t += d+0.35
     timeline = {'total': t+0.9, 'lines': lines, 'voice_engine': engine,
-                'word_timing': 'service-boundaries' if engine == 'edge' else 'estimated'}
+                'word_timing': 'service-boundaries' if engine == 'edge' else 'model-phoneme-alignment'}
     (out / 'timeline.json').write_text(json.dumps(timeline, indent=2))
     return timeline
