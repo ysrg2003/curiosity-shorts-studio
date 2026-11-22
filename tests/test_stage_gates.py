@@ -1,0 +1,95 @@
+"""Synthetic enforcement tests. No real topic, sources, model or media execution."""
+from copy import deepcopy
+import json
+import pytest
+from curiosity import autonomy, batch, evidence, planner, spec, storyboard, story_slots
+from test_story_slots import fixture, records
+
+
+@pytest.mark.parametrize('decision,accepted', [('missing', False), (False, False), ('true', False), (True, True)])
+def test_topic_acceptance_must_be_explicit_literal_true(monkeypatch, decision, accepted):
+    def ask(*args, **kwargs):
+        result = {'supported': True, 'source_assessments': [
+            {'source_index': i, 'usable': True, 'reason': 'Synthetic source fixture'} for i in range(2)],
+            'observable_quote_ids': ['S0Q0'], 'mechanism_quote_ids': ['S1Q0'], 'issues': []}
+        if decision != 'missing':
+            result['topic_assessment'] = {'suitable': decision, 'reason': 'Synthetic topic fixture'}
+        return result, {}
+    monkeypatch.setattr(storyboard, 'ask', ask)
+    ok, report = evidence.screen('Synthetic fixture question?', records(), 'synthetic')
+    assert ok is accepted and report['topic_suitability_accepted'] is accepted
+    if not accepted: assert report['approved_source_indices'] == []
+
+
+@pytest.mark.parametrize('broken', ['layout', 'bounds', 'source_catalog'])
+def test_inconsistent_specification_is_rejected_before_a_draft_call(monkeypatch, tmp_path, broken):
+    _, entries = fixture()
+    if broken == 'layout': monkeypatch.setattr(story_slots, 'LAYOUT', story_slots.LAYOUT[:-1])
+    elif broken == 'bounds': monkeypatch.setattr(story_slots, 'WORD_BOUNDS', {'PIP': (40, 44), 'RAY': (40, 44)})
+    else: entries = {next(iter(entries)): next(iter(entries.values()))}
+    monkeypatch.setattr(evidence, 'catalog', lambda sources: entries)
+    monkeypatch.setattr(storyboard, 'source_pack', lambda topic, sources: sources)
+    def forbidden(*args, **kwargs): raise AssertionError('Draft inference started before specification validation')
+    monkeypatch.setattr(storyboard, 'ask', forbidden)
+    target = tmp_path / 'test.json'
+    with pytest.raises(ValueError): planner.draft('Synthetic fixture question?', target, source_records=records())
+    assert not target.exists()
+
+
+def test_failed_topic_gate_never_starts_script_audio_or_video(monkeypatch, tmp_path):
+    (tmp_path / 'studio.json').write_text(json.dumps({'video_count': 1, 'max_videos_per_run': 20, 'draft_model': 'synthetic'}))
+    monkeypatch.setattr(batch, 'ROOT', tmp_path)
+    monkeypatch.setenv('MODE', 'automatic')
+    monkeypatch.setenv('VIDEO_COUNT', '1')
+    monkeypatch.setenv('CURIOSITY_LLM_BACKEND', 'ollama')
+    candidates = [{'question': f'Why does synthetic fixture {i} move?', 'search_terms': 'synthetic test'} for i in range(3)]
+    monkeypatch.setattr(autonomy, 'questions', lambda *a, **k: (candidates, {}))
+    monkeypatch.setattr(autonomy, 'research', lambda *a, **k: (records(), {}))
+    def assess(*args, **kwargs):
+        return {'topic_assessment': {'suitable': False, 'reason': 'Synthetic unsuitable-topic fixture'},
+                'source_assessments': [{'source_index': i, 'usable': True, 'reason': 'Synthetic fixture'} for i in range(2)],
+                'supported': True, 'observable_quote_ids': ['S0Q0'], 'mechanism_quote_ids': ['S1Q0'], 'issues': []}, {}
+    monkeypatch.setattr(storyboard, 'ask', assess)
+    def forbidden(*args, **kwargs): raise AssertionError('A downstream stage started despite failed upstream acceptance')
+    monkeypatch.setattr(planner, 'draft', forbidden)
+    monkeypatch.setattr(batch.subprocess, 'run', forbidden)
+    with pytest.raises(autonomy.ResearchUnavailable): batch.generate()
+    audit = json.loads((tmp_path / 'drafts/episode-1.selection.json').read_text())
+    assert len(audit['rejections']) == 3 and not (tmp_path / 'output').exists()
+    assert all(not item['details']['research']['relevance']['topic_suitability_accepted'] for item in audit['rejections'])
+
+
+def patch_valid_draft(monkeypatch):
+    raw, _ = fixture()
+    monkeypatch.setattr(storyboard, 'source_pack', lambda topic, sources: sources)
+    def ask(model, system, prompt, schema, *args, **kwargs):
+        if 'slots' in schema['properties']: return deepcopy(raw), {'synthetic': True}
+        return {'supported': True, 'issues': []}, {'synthetic': True}
+    monkeypatch.setattr(storyboard, 'ask', ask)
+    return raw
+
+
+def test_final_specification_cannot_be_marked_accepted_before_validation(monkeypatch, tmp_path):
+    patch_valid_draft(monkeypatch)
+    def reject(obj): raise ValueError('Synthetic invalid final specification')
+    monkeypatch.setattr(spec, 'validate_spec', reject)
+    target = tmp_path / 'test.json'
+    with pytest.raises(ValueError, match='Synthetic invalid'): planner.draft('Synthetic fixture question?', target, source_records=records())
+    report = json.loads(target.with_suffix('.audit.json').read_text())
+    assert report['accepted'] is False and report['failure_stage'] == 'episode_specification'
+    assert not target.exists()
+
+
+def test_accepted_draft_uses_generation_contract_not_posthoc_beat_repair(monkeypatch, tmp_path):
+    from curiosity import staging
+    raw = patch_valid_draft(monkeypatch)
+    def forbidden(*args, **kwargs): raise AssertionError('Post-generation beat repair is not allowed in this path')
+    monkeypatch.setattr(staging, 'stage_story', forbidden)
+    target = tmp_path / 'test.json'
+    obj = planner.draft('Synthetic fixture question?', target, source_records=records())
+    report = json.loads(target.with_suffix('.audit.json').read_text())
+    preflight = json.loads(target.with_suffix('.specification.json').read_text())
+    assert report['accepted'] and report['episode_specification_accepted']
+    assert preflight['spoken_word_bounds'] == [176, 228] and preflight['post_generation_narration_repair'] is False
+    assert [x['text'] for x in obj['lines']] == [raw['slots'][name]['text'] for name, _, _ in story_slots.LAYOUT]
+    assert obj['science_reviewed'] is False
