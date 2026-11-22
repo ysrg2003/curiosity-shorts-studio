@@ -50,6 +50,7 @@ def test_draft_uses_existing_ids_and_fixed_odd_line_count_without_authored_words
 def test_relevance_requires_true_boolean_and_observation_mechanism_two_sources(monkeypatch):
     mode=['valid']
     def ask(model,system,prompt,schema,endpoint,seed,effort):
+        if 'complete_answer' in schema['properties']:return {'complete_answer':True,'qualifiers_preserved':True,'no_exclusive_or_universal_overclaim':True,'issues':[]},{}
         assert effort=='low'
         ids=list(prompt['sentence_catalog']);first=next(k for k in ids if k.startswith('S0'));second=next(k for k in ids if k.startswith('S1'))
         return {'topic_assessment':{'suitable':True,'reason':'fits_short_visual_science'},'source_assessments':[{'source_index':i,'usable':True,'reason':'current_observation_or_mechanism'} for i in range(2)],'answer':'Synthetic observations remain fictional in this bounded unit test.','answer_quote_ids':[first,second],'supported':True if mode[0]!='string_false' else 'false','observable_quote_ids':[first],'mechanism_quote_ids':[second if mode[0]!='one_source' else first],'issues':[]},{'usage':{'cost':'0'}}
@@ -124,6 +125,7 @@ def test_source_pack_keeps_document_origin_separate_within_same_budget():
 @pytest.mark.parametrize('mode',['flagged_source','duplicate_assessment','missing_assessment','string_usable','issues','unknown_quote'])
 def test_relevance_rejects_inconsistent_source_assessments_and_selected_evidence(monkeypatch,mode):
     def ask(model,system,prompt,schema,*args,**kwargs):
+        if 'complete_answer' in schema['properties']:return {'complete_answer':True,'qualifiers_preserved':True,'no_exclusive_or_universal_overclaim':True,'issues':[]},{}
         assert schema['properties']['source_assessments']['minItems']==2
         assessments=[{'source_index':0,'usable':True,'reason':'current_observation_or_mechanism'},{'source_index':1,'usable':True,'reason':'current_observation_or_mechanism'}]
         result={'topic_assessment':{'suitable':True,'reason':'fits_short_visual_science'},'source_assessments':assessments,'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]}
@@ -145,8 +147,21 @@ def test_valid_source_subset_excludes_unusable_pool_records_before_drafting(monk
     monkeypatch.setattr(autonomy,'questions',lambda *args:([{'question':'Synthetic observation?','search_terms':'synthetic mechanism'}],{}))
     monkeypatch.setattr(autonomy,'research',lambda *args:(pool,{}))
     def ask(model,system,prompt,schema,*args,**kwargs):
+        if 'complete_answer' in schema['properties']:return {'complete_answer':True,'qualifiers_preserved':True,'no_exclusive_or_universal_overclaim':True,'issues':[]},{}
         return {'topic_assessment':{'suitable':True,'reason':'fits_short_visual_science'},'source_assessments':[{'source_index':i,'usable':i<2,'reason':'current_observation_or_mechanism' if i<2 else 'historical_or_obsolete'} for i in range(3)],'answer':'Synthetic observations remain fictional in this bounded unit test.','answer_quote_ids':['S0Q0','S1Q0'],'supported':True,'observable_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'issues':[]},{}
     monkeypatch.setattr(storyboard,'ask',ask)
     selected,approved,audit=autonomy.select_and_research('synthetic',[])
     assert selected=='Synthetic observation?' and approved==pool[:2] and len(pool)==3
     assert audit['research']['relevance']['approved_source_indices']==[0,1]
+
+
+@pytest.mark.parametrize('qualification',[False,True])
+def test_entailed_answer_still_requires_full_passage_scope_audit(monkeypatch,qualification):
+    def ask(model,system,prompt,shape,*args,**kwargs):
+        if 'complete_answer' in shape['properties']:
+            return {'complete_answer':qualification,'qualifiers_preserved':qualification,'no_exclusive_or_universal_overclaim':qualification,'issues':[] if qualification else ['answer_not_supported']},{}
+        ids=list(prompt['sentence_catalog']);first=next(k for k in ids if k.startswith('S0'));second=next(k for k in ids if k.startswith('S1'))
+        return {'topic_assessment':{'suitable':True,'reason':'fits_short_visual_science'},'source_assessments':[{'source_index':i,'usable':True,'reason':'current_observation_or_mechanism'} for i in range(2)],'answer':'Synthetic observations remain fictional in this bounded unit test.','answer_quote_ids':[first,second],'supported':True,'observable_quote_ids':[first],'mechanism_quote_ids':[second],'issues':[]},{}
+    monkeypatch.setattr(storyboard,'ask',ask)
+    accepted,audit=evidence.screen('Synthetic observation?',sources(),'synthetic')
+    assert accepted is qualification and audit['independent_entailment']['qualification_audit']['accepted'] is qualification
