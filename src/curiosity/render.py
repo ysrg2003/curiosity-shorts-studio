@@ -40,6 +40,9 @@ def render(spec, out, seconds=None, width=1080):
     from PIL import ImageDraw
     module = load_renderer(spec, out)
     tl = json.loads((Path(out) / 'timeline.json').read_text())
+    from .motion import prepare,Frames
+    motion=prepare(spec,tl,out,1080)
+    motion_reader=None;motion_idx=None
     lipsync = install_lipsync(module)
     if hasattr(module,'draw_caption'):module.draw_caption=lambda *args:None
     if hasattr(module,'caption'):module.caption=lambda *args:None
@@ -64,7 +67,14 @@ def render(spec, out, seconds=None, width=1080):
             pos = int(max(0,t-ln['start'])*ln.get('mouth_hz',40))
             lipsync.update(speaker=ln['speaker'],amplitude=env[pos] if pos<len(env) and t>=ln['start'] else 0)
             beat = ln['beat']
-            frame = module.beat_frame(beat, t)
+            if ln['idx'] in motion:
+                if motion_idx!=ln['idx']:
+                    if motion_reader:motion_reader.close()
+                    motion_reader=Frames(motion[ln['idx']],1080,1920);motion_idx=ln['idx']
+                frame=motion_reader.next()
+            else:
+                if motion_reader:motion_reader.close();motion_reader=None;motion_idx=None
+                frame = module.beat_frame(beat, t)
             dt = t - ln['start']
             # Preserve the original short transitions when the selected renderer declares them.
             if hasattr(module, 'RIG_PREV') and beat in module.RIG_PREV and 0 <= dt < 0.35:
@@ -92,6 +102,7 @@ def render(spec, out, seconds=None, width=1080):
             if fr % 240 == 0:
                 print(f'Render {fr}/{math.ceil(total*fps)}', flush=True)
     finally:
+        if motion_reader:motion_reader.close()
         proc.stdin.close()
         proc.wait()
     if proc.returncode:
