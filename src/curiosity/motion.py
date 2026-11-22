@@ -8,6 +8,10 @@ from .spec import ROOT
 
 
 def prepare(spec,timeline,out,width):
+    if spec.get('visual_engine')=='generated-manim':
+        if width!=1080:raise ValueError('Generated-scene compositor currently requires1080pixels')
+        from .generated_motion import prepared
+        return prepared(spec,timeline,out)
     config=json.loads((ROOT/'studio.json').read_text())
     if spec['renderer']!='generic' or config.get('motion_renderer')!='manim':return {}
     module_spec=importlib.util.spec_from_file_location('curiosity_motion_scene',ROOT/'creative/motion_scene.py')
