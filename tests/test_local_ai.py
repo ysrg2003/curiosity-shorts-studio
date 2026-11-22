@@ -79,3 +79,30 @@ def test_metadata_workflow_has_no_inference_or_service_key():
     text=(ROOT/'.github/workflows/check-local-model.yml').read_text()
     assert '--inspect-only' in text and 'contents: read' in text and 'persist-credentials: false' in text
     assert 'secrets.' not in text and 'curiosity.batch' not in text and 'schedule:' not in text
+
+
+def test_response_probe_is_bounded_non_episode_content_and_rejects_thinking(monkeypatch):
+    monkeypatch.setattr(local_ai,'read_metadata',lambda:({'digest':local_ai.MANIFEST},{'capabilities':['completion','thinking']}))
+    response=[{'response':'{"ready":true}','done':True,'done_reason':'stop','eval_count':6}];calls=[]
+    def read(request,**kwargs):
+        payload=json.loads(request.data);calls.append(payload)
+        assert payload['think'] is False and payload['options']['num_predict']==64 and kwargs['timeout']==120
+        return io.StringIO(json.dumps(response[0]))
+    monkeypatch.setattr(local_ai,'urlopen',read)
+    assert local_ai.probe()['accepted'] and len(calls)==1
+    response[0]['thinking']='synthetic content never retained'
+    result=local_ai.probe();assert not result['accepted'] and 'synthetic content' not in json.dumps(result)
+    response[0]={'response':'{"ready":','done':True}
+    assert not local_ai.probe()['accepted']
+    monkeypatch.setattr(local_ai,'read_metadata',lambda:({'digest':'changed'},{}))
+    with pytest.raises(ValueError,match='manifest'):local_ai.probe()
+    assert len(calls)==3
+
+
+def test_response_probe_does_not_accept_truthy_non_booleans_or_length_finish(monkeypatch):
+    monkeypatch.setattr(local_ai,'read_metadata',lambda:({'digest':local_ai.MANIFEST},{}))
+    response=[{'response':'{"ready":1}','done':True,'done_reason':'stop'}]
+    monkeypatch.setattr(local_ai,'urlopen',lambda *a,**k:io.StringIO(json.dumps(response[0])))
+    assert not local_ai.probe()['accepted']
+    response[0]={'response':'{"ready":true}','done':True,'done_reason':'length'}
+    assert not local_ai.probe()['accepted']
