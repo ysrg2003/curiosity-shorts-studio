@@ -118,7 +118,9 @@ from curiosity import autonomy, planner
 
 
 @pytest.fixture(autouse=True)
-def isolated_transport(monkeypatch):
+def isolated_transport(monkeypatch,request):
+    if request.node.name!='test_full_extract_has_explicit_limit_matching_identity_and_scope':
+        monkeypatch.setattr(autonomy,'wiki_article',lambda page_id:(_ for _ in ()).throw(OSError('Fictional no full extract fixture')))
     monkeypatch.setattr(planner,'_SOURCE_CACHE',{})
     monkeypatch.setattr(planner,'_SOURCE_FAILURES',{})
     monkeypatch.setattr(planner,'_PROVIDER_STOPS',{})
@@ -382,3 +384,62 @@ def test_globally_ranked_citations_prefer_exact_subject_over_pool_turns(monkeypa
     with pytest.raises(autonomy.ResearchUnavailable):autonomy.research('Why does a synthetic fixture move?','synthetic motion','synthetic fixture')
     assert len(reads)==10 and all('host2-' in url for url in reads[:6])
     assert sum('host2-' in url for url in reads)==6
+
+
+"""Fictional source controls, never inputs for automatic production."""
+from curiosity import autonomy,storyboard,entailment
+
+
+def test_citation_uses_body_context_and_keeps_title_separate():
+    parser=autonomy.CitationLinks()
+    parser.feed('<p>The fictional vane moves because a tiny motor turns its axle. <sup><a href="#cite_note-opaque-1">[1]</a></sup></p><p>Another unrelated paragraph.</p><ol><li id="cite_note-opaque-1">Opaque experiment title <a href="https://example.edu/opaque">Read</a></li></ol>')
+    item=parser.items[0]
+    assert 'motor turns its axle' in item['body_context']
+    assert 'Opaque experiment title' in item['citation_context']
+    assert 'unrelated' not in item['context']
+
+
+def test_repeated_citation_context_is_bounded_and_preserves_qualifier():
+    parser=autonomy.CitationLinks()
+    parser.feed(''.join('<p>In the fictional laboratory only, a motor moves the vane. <a href="#cite_note-demo">[1]</a></p>' for _ in range(8))+'<li id="cite_note-demo"><a href="https://example.edu/demo">Paper</a></li>')
+    assert parser.items[0]['body_context'].count('laboratory only')==1
+
+
+def test_semantic_source_pack_preserves_original_contiguous_passage_and_budget(monkeypatch):
+    opening='Historical fictional context for a demonstration. '*20
+    middle='An unrelated fictional biography fills this introductory section. '*35
+    target='In this fictional experiment, the motor turns the axle and moves the vane. This effect was only observed in the laboratory, not outdoors. '
+    text=opening+middle+target*6
+    monkeypatch.setattr(entailment,'relevance_scores',lambda q,passages:[10 if 'motor turns' in p else -10 for p in passages])
+    packed=storyboard.source_pack('Why does the fictional vane move?',[{'url':'https://example.edu/fiction','text':text}],budget=1600,semantic=True)[0]
+    assert packed['text'] in text and 'motor turns' in packed['text'] and 'only observed' in packed['text']
+    assert len(packed['text'])+len(packed.get('document_opening',''))<=1600
+    assert packed['document_opening']==text[:600]
+
+
+def test_passage_rank_reads_later_original_windows_not_just_opening(monkeypatch):
+    text='An irrelevant fictional biography describes a performer and the venue. '*80+'A motor turns the fictional axle and raises the small flag. '*8
+    seen=[]
+    def rank(q,passages):
+        seen.extend(passages);return [8 if 'motor turns' in p else -8 for p in passages]
+    monkeypatch.setattr(entailment,'relevance_scores',rank)
+    assert storyboard.passage_rank('Why does the flag rise?',text)==8
+    assert len(seen)<=40 and all(len(p)<=1802 for p in seen)
+
+
+def test_full_extract_has_explicit_limit_matching_identity_and_scope(monkeypatch):
+    from urllib.parse import parse_qs,urlparse
+    def fetch(url):
+        query=parse_qs(urlparse(url).query)
+        assert 'exchars' not in query and 'exintro' not in query
+        return {'query':{'pages':{'12':{'pageid':12,'title':'Fictional experiment','fullurl':'https://en.wikipedia.org/wiki/Fixture','extract':'A fictional motor turns a vane. '*30}}}}
+    monkeypatch.setattr(autonomy,'fetch',fetch);monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    source=autonomy.wiki_article(12)
+    assert source['source_scope']=='encyclopedia_article_excerpt' and 'motor' in source['text']
+
+
+def test_education_government_host_rules_are_generic_not_a_topic_whitelist():
+    assert autonomy.eligible_reference('https://fictional.weather.gov/article')
+    assert autonomy.eligible_reference('https://fictional.ac.uk/article')
+    assert not autonomy.eligible_reference('https://fictional.gov.attacker.invalid/article')
+    assert not autonomy.eligible_reference('https://fictional.gov/search?q=example')
