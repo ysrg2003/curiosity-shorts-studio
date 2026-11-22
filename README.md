@@ -96,3 +96,10 @@ MODE=automatic VIDEO_COUNT=1 VOICE=kokoro CURIOSITY_LLM_BACKEND=ollama python -m
 ### Prose contracts and failure diagnostics
 
 Native inference constrains JSON structure, not prose lengths or word boundaries. The original string limits are supplied separately to the writer and remain mandatory client checks. Failed contracts retain field paths, rules, counts and generation timing without copying generated prose into error metadata. The source-assessment stage can make at most two fresh attempts, with specific contract feedback; it does not repair text or retry a valid negative scientific verdict into approval. Source contract failure is recorded separately from insufficient evidence, and actual retrieval provenance is preserved. A valid JSON response still needs the independent evidence and story gates before any media.
+
+
+### Structured source decisions and balanced discovery
+
+Source audit reasons and remaining issues are closed reason codes, not free-form paragraphs with arbitrary audit-prose limits. Decision flags must agree with those codes. A negative source verdict may have an empty answer; a positive decision still needs a complete source-supported answer, original evidence IDs, two usable source groups and independent entailment before drafting. Spoken-word, narration-length, evidence and story gates are unchanged. Sentence candidates without ending punctuation are rejected rather than offered as complete evidence.
+
+Both the mechanism and exact-question discovery pools are requested before article retrieval. Reference candidates are interleaved across discovered pages within the same global10article-attempt and per-page6attempt limits. The mechanism pool supplies the first usable encyclopedia introduction, rather than letting unrelated full-question results consume the whole budget. Discovery is not scientific approval. Rejected draft contracts can retain a separately labeled untrusted diagnostic response for inspection; it is never an accepted episode or a repaired script.
