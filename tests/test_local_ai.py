@@ -8,7 +8,7 @@ def test_local_preflight_verifies_manifest_and_explicit_non_thinking_metadata(mo
     digest=[local_ai.MANIFEST];values=[[False]];requests=[]
     def read(request,**kwargs):
         requests.append(request)
-        data={'models':[{'name':local_ai.MODEL,'digest':digest[0]}]} if isinstance(request,str) else {'thinking':{'values':values[0]}}
+        data={'models':[{'name':local_ai.MODEL,'digest':digest[0]}]} if isinstance(request,str) else {'thinking':{'values':values[0]},'capabilities':['completion']}
         return io.StringIO(json.dumps(data))
     monkeypatch.setattr(local_ai,'urlopen',read)
     assert local_ai.verify()['non_thinking_only'] and len(requests)==2
@@ -37,3 +37,30 @@ def test_default_config_and_workflow_pull_the_pinned_local_model():
     assert json.loads((ROOT/'studio.json').read_text())['draft_model']==local_ai.MODEL
     workflow=(ROOT/'.github/workflows/generate.yml').read_text()
     assert 'ollama pull '+local_ai.MODEL in workflow and 'python -m curiosity.local_ai' in workflow
+
+
+def test_only_the_pinned_instruct_model_can_use_legacy_metadata_absence(monkeypatch):
+    shown=[{'capabilities':['completion']}];digest=[local_ai.MANIFEST]
+    def read(request,**kwargs):
+        data={'models':[{'name':local_ai.MODEL,'digest':digest[0]}]} if isinstance(request,str) else shown[0]
+        return io.StringIO(json.dumps(data))
+    monkeypatch.setattr(local_ai,'urlopen',read)
+    assert local_ai.verify()['thinking_control_source']=='pinned_instruct_manifest_and_capabilities'
+    shown[0]={'capabilities':['completion','thinking']}
+    with pytest.raises(ValueError,match='capabilities'):local_ai.verify()
+    shown[0]={}
+    with pytest.raises(ValueError,match='capabilities'):local_ai.verify()
+    shown[0]={'capabilities':['completion'],'thinking':{'values':[True]}}
+    with pytest.raises(ValueError,match='metadata'):local_ai.verify()
+    shown[0]={'capabilities':['completion']};digest[0]='different-instruct-tag-is-not-permission'
+    with pytest.raises(ValueError,match='manifest'):local_ai.verify()
+
+
+def test_local_scene_adapter_also_rejects_unexpected_thinking(monkeypatch):
+    import importlib.util
+    from curiosity.spec import ROOT
+    spec=importlib.util.spec_from_file_location('local_scene_model_test',ROOT/'experiments/upstream_pipeline.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    monkeypatch.setenv('CURIOSITY_LLM_BACKEND','ollama')
+    monkeypatch.setattr(module,'urlopen',lambda *a,**k:io.StringIO(json.dumps({'thinking':'synthetic disallowed reasoning','response':'synthetic scene code'})))
+    with pytest.raises(remote_ai.ModelOutputInvalid):module.LocalModel(local_ai.MODEL).generate('synthetic')
