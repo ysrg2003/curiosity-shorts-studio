@@ -168,3 +168,76 @@ def test_provider_errors_keep_numeric_status_but_never_raw_messages(monkeypatch)
     with pytest.raises(RuntimeError) as found:remote_ai.request('synthetic','synthetic')
     assert '429' in str(found.value) and 'rate_limit' in str(found.value)
     assert 'synthetic-sensitive' not in str(found.value) and 'synthetic-unit-test-only' not in str(found.value)
+
+
+def test_generic_generated_scene_contract_rejects_unsupplied_assets():
+    import importlib.util
+    from curiosity.spec import ROOT
+    spec=importlib.util.spec_from_file_location('asset_contract_test',ROOT/'experiments/upstream_pipeline.py')
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    assert module.extra_lint('from manim import *\nx=SVGMobject("synthetic-fixture.svg")')
+    assert not module.extra_lint('from manim import *\nx=Circle(radius=0.7)')
+    assert module.extra_lint('class MainScene(:')
+
+
+def test_complete_json_extraction_does_not_repair_truncation_or_accept_inner_objects():
+    assert remote_ai.object_from_text('Preface\n```json\n{"ok":true}\n```')=={'ok':True}
+    with pytest.raises(ValueError):remote_ai.object_from_text('{"lines":[{"text":"unfinished"}')
+
+def test_local_schema_rejects_string_boolean_instead_of_trusting_truthiness(monkeypatch):
+    adapter=pytest.importorskip('ai_router.providers.openai_compatible')
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-unit-test-only')
+    monkeypatch.setattr(remote_ai,'check_free_catalog',lambda:True)
+    monkeypatch.setattr(adapter.OpenAICompatibleAdapter,'complete_json',lambda *a,**k:SimpleNamespace(payload={'supported':'false'},usage={'cost':0}))
+    with pytest.raises(remote_ai.ModelOutputInvalid):remote_ai.request('synthetic','synthetic',schema={'type':'object','properties':{'supported':{'type':'boolean'}},'required':['supported']})
+
+def test_http_shape_reports_truncation_without_content_or_credentials(monkeypatch):
+    adapter=pytest.importorskip('ai_router.providers.openai_compatible')
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-unit-test-only')
+    monkeypatch.setattr(remote_ai,'check_free_catalog',lambda:True)
+    response=SimpleNamespace(status_code=200,json=lambda:{'choices':[{'finish_reason':'length','message':{'content':'{"private_fragment":"synthetic'}}],'usage':{'cost':0,'completion_tokens':12000}})
+    monkeypatch.setattr(adapter.requests,'post',lambda *a,**k:response)
+    with pytest.raises(remote_ai.ModelOutputInvalid) as found:remote_ai.request('synthetic','synthetic',json_mode=True)
+    assert found.value.metadata['finish_reason']=='length' and found.value.metadata['http_status']==200
+    assert 'private_fragment' not in str(found.value) and 'synthetic-unit-test-only' not in str(found.value)
+
+def test_cost_checked_even_if_model_json_is_incomplete(monkeypatch):
+    adapter=pytest.importorskip('ai_router.providers.openai_compatible')
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-unit-test-only')
+    monkeypatch.setattr(remote_ai,'check_free_catalog',lambda:True)
+    response=SimpleNamespace(status_code=200,json=lambda:{'choices':[{'message':{'content':'incomplete synthetic output'}}],'usage':{'cost':0.01}})
+    monkeypatch.setattr(adapter.requests,'post',lambda *a,**k:response)
+    with pytest.raises(remote_ai.UnexpectedModelCost,match='nonzero'):remote_ai.request('synthetic','synthetic',json_mode=True)
+
+
+def test_http_errors_retain_only_safe_shape_and_do_not_retry(monkeypatch):
+    adapter=pytest.importorskip('ai_router.providers.openai_compatible')
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-unit-test-only')
+    monkeypatch.setattr(remote_ai,'check_free_catalog',lambda:True)
+    calls=[]
+    def post(*a,**k):
+        calls.append(True)
+        return SimpleNamespace(status_code=429,json=lambda:{'error':{'message':'synthetic private text must not be retained'}})
+    monkeypatch.setattr(adapter.requests,'post',post)
+    with pytest.raises(remote_ai.ModelRequestFailed) as found:remote_ai.request('synthetic','synthetic',json_mode=True)
+    assert found.value.metadata['http_status']==429 and len(calls)==1
+    assert 'private text' not in str(found.value) and 'synthetic-unit-test-only' not in str(found.value)
+
+def test_draft_only_retries_output_invalid_not_account_errors(monkeypatch,tmp_path):
+    from curiosity import planner,storyboard
+    import json
+    sources=[{'url':'https://example.edu/a','text':'synthetic evidence a'},{'url':'https://example.org/b','text':'synthetic evidence b'}]
+    monkeypatch.setattr(storyboard,'source_pack',lambda topic,sources:sources)
+    calls=[]
+    def invalid(*a,**k):
+        calls.append(True);raise remote_ai.ModelOutputInvalid({'finish_reason':'length'})
+    monkeypatch.setattr(storyboard,'ask',invalid)
+    with pytest.raises(ValueError,match='after 3 attempts'):planner.draft('Synthetic?',tmp_path/'test.json',source_records=sources)
+    audit=json.loads((tmp_path/'test.audit.json').read_text())
+    assert len(calls)==3 and len(audit['attempts'])==3 and not audit['accepted']
+    calls.clear()
+    def account_error(*a,**k):
+        calls.append(True);raise remote_ai.ModelRequestFailed({'http_status':401,'category':'auth','reason':'authentication_rejected'})
+    monkeypatch.setattr(storyboard,'ask',account_error)
+    with pytest.raises(remote_ai.ModelRequestFailed):planner.draft('Synthetic?',tmp_path/'second.json',source_records=sources)
+    assert len(calls)==1
