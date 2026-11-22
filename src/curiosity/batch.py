@@ -9,7 +9,7 @@ from .process_safety import media_environment
 from .spec import ROOT, write_json
 
 
-def main():
+def generate():
     config=json.loads((ROOT/'studio.json').read_text())
     count=int(os.environ.get('VIDEO_COUNT') or config['video_count'])
     if not 1<=count<=config['max_videos_per_run']:
@@ -23,6 +23,13 @@ def main():
     elif mode in ('new-topic','automatic'):
         from .planner import draft
         from .autonomy import select_and_research,ResearchUnavailable
+        if os.environ.get('CURIOSITY_LLM_BACKEND')=='openrouter-free':
+            from .remote_ai import free_quota_status
+            quota=free_quota_status(minimum_requests=23*count)
+            (ROOT/'drafts').mkdir(parents=True,exist_ok=True)
+            write_json(ROOT/'drafts/quota-budget.json',{**quota,'video_count':count,'rule':'conservative maximum 23 inference requests per automatic video; availability can still change'})
+            if quota['http_status']!=200 or quota['request_budget']!='sufficient_for_bounded_attempt':
+                raise RuntimeError('Request budget is unavailable or below the conservative reserve. No inference attempted.')
         topic=os.environ.get('TOPIC','Why do we get goosebumps?').strip()
         topics=[x.strip() for x in re.split(r"[;\n]+",topic) if x.strip()]
         if mode=='new-topic' and not topics: raise ValueError('Supply at least one topic')
@@ -62,6 +69,15 @@ def main():
                 m=json.loads(path.read_text())
                 f.write(f'## {m["episode"]}\n\nSHA256: `{m["video_sha256"]}`\n\nVoice: {m["voice"]}; word timing: {m["word_timing"]}.\n\n')
             f.write('Inspect final.mp4, review.jpg, qa.json, episode.json and sources before publishing.\n')
+
+
+def main():
+    from .remote_ai import ModelOutputInvalid,ModelRequestFailed,UnexpectedModelCost
+    try:generate()
+    except (ModelOutputInvalid,ModelRequestFailed,UnexpectedModelCost) as error:
+        (ROOT/'drafts').mkdir(parents=True,exist_ok=True)
+        write_json(ROOT/'drafts/model-failure.json',{'accepted':False,'kind':type(error).__name__,'response_shape':error.metadata if isinstance(error,(ModelOutputInvalid,ModelRequestFailed)) else {},'complete_video':False})
+        raise
 
 
 if __name__=='__main__':main()
