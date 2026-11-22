@@ -171,3 +171,38 @@ def test_audio_envelope_has_real_silence():
     from curiosity.alignment import envelope
     env=envelope(np.r_[np.zeros(50),np.ones(50)],100,hz=10)
     assert env[:5]==[0]*5 and env[5:]==[1]*5
+
+
+def test_public_ledger_hides_unverified_upload_id(tmp_path,monkeypatch):
+    from curiosity.youtube import UploadUncertain
+    monkeypatch.setenv('CURIOSITY_PUBLIC_LEDGER','1')
+    sha=make_bundle(tmp_path,reviewed=True)
+    service=MagicMock()
+    service.channels.return_value.list.return_value.execute.return_value={'items':[{'id':CHANNEL}]}
+    service.videos.return_value.insert.return_value.next_chunk.return_value=(None,{'id':'unverified-video-id'})
+    service.videos.return_value.list.return_value.execute.return_value={'items':[{'snippet':{'channelId':CHANNEL},'status':{'privacyStatus':'private'}}]}
+    ledger=tmp_path/'uploads.json'
+    with pytest.raises(UploadUncertain):upload(tmp_path,'missing-token',ledger,sha,privacy='public',service=service)
+    raw=ledger.read_text()
+    assert 'unverified-video-id' not in raw and CHANNEL not in raw
+    assert json.loads(raw)[sha]['state']=='uploaded_unverified'
+
+
+def test_public_ledger_retains_only_verified_public_receipt(tmp_path,monkeypatch):
+    monkeypatch.setenv('CURIOSITY_PUBLIC_LEDGER','1')
+    sha=make_bundle(tmp_path,reviewed=True)
+    service=MagicMock()
+    service.channels.return_value.list.return_value.execute.return_value={'items':[{'id':CHANNEL}]}
+    service.videos.return_value.insert.return_value.next_chunk.return_value=(None,{'id':'verified-public-id'})
+    service.videos.return_value.list.return_value.execute.return_value={'items':[{'snippet':{'channelId':CHANNEL},'status':{'privacyStatus':'public','uploadStatus':'uploaded'}}]}
+    ledger=tmp_path/'uploads.json'
+    result=upload(tmp_path,'missing-token',ledger,sha,privacy='public',service=service)
+    assert result['video_id']=='verified-public-id'
+    assert json.loads(ledger.read_text())[sha]['state']=='verified'
+
+
+def test_unexpected_publication_exception_cannot_echo_api_url():
+    from curiosity.youtube import failure_message
+    message=failure_message(RuntimeError('A provider URL with an unverified identifier and credentials'))
+    assert 'provider URL' not in message and 'Do not retry' not in message
+    assert 'before any retry' in message
