@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "id": "stomach-growl",
+  "title": "Why Does Your Stomach Growl?",
+  "renderer": "stomach_growl",
+  "language": "en",
+  "description": "Why does an empty belly rumble? Pip and Ray follow muscular waves through the gut. Feeding interrupts the fasting migrating motor complex; gut sounds can still happen after meals. Educational animation, not medical advice.",
+  "tags": [
+    "science",
+    "curiosity",
+    "shorts",
+    "Pip and Ray"
+  ],
+  "sources": [
+    "https://www.scientificamerican.com/article/why-does-your-stomach-gro/",
+    "https://www.nature.com/articles/nrgastro.2012.57"
+  ],
+  "science_reviewed": true,
+  "lines": [
+    {
+      "speaker": "PIP",
+      "text": "Grrrrrk... RAY! My belly just made a MONSTER noise!",
+      "beat": "zap"
+    },
+    {
+      "speaker": "RAY",
+      "text": "That was not a monster. That was borborygmi. It is Greek for rumbling.",
+      "beat": "hook"
+    },
+    {
+      "speaker": "PIP",
+      "text": "My belly speaks GREEK now?!",
+      "beat": "ask"
+    },
+    {
+      "speaker": "RAY",
+      "text": "It speaks muscle. Your gut is one long tube with walls of muscle... and those walls squeeze in waves.",
+      "beat": "explain"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Waves?! In my belly? What are they pushing?",
+      "beat": "ask2"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Food, juice, and swallowed air. Every squeeze mixes and pushes them along... and the pushing makes the rumble.",
+      "beat": "explain1b"
+    },
+    {
+      "speaker": "PIP",
+      "text": "But why is it SO much louder when I am hungry?",
+      "beat": "gag"
+    },
+    {
+      "speaker": "RAY",
+      "text": "When your stomach has been empty for about two hours, special sensors in its walls trigger a cleaning wave... the migrating motor complex.",
+      "beat": "explain2"
+    },
+    {
+      "speaker": "PIP",
+      "text": "A cleaning wave? My gut has a MAID?",
+      "beat": "ask3"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Exactly! It sweeps leftover crumbs and mucus all the way down, so nothing piles up. And an empty tube cannot muffle the sound... so you hear it LOUD.",
+      "beat": "explain2b"
+    },
+    {
+      "speaker": "PIP",
+      "text": "So the growl is my gut vacuuming. Incredible!",
+      "beat": "gag2"
+    },
+    {
+      "speaker": "RAY",
+      "text": "The wave rolls for ten to twenty minutes, then comes back every hour or two... until you finally eat something.",
+      "beat": "watch"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Then I know exactly how to fire the maid. SNACK time!",
+      "beat": "gag3"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Feed it, and the cleaning wave pauses. Your gut still moves... but on the fed shift.",
+      "beat": "finale"
+    },
+    {
+      "speaker": "PIP",
+      "text": "My belly: rumbling since the ancient Greeks. SCIENCE!",
+      "beat": "react"
+    }
+  ]
+}

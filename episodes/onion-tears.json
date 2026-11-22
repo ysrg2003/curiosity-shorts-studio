@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "onion-tears",
+  "title": "Why Do Onions Make You Cry?",
+  "renderer": "onion_tears",
+  "language": "en",
+  "description": "Why Do Onions Make You Cry?\nA Pip and Ray science short. Educational, not medical advice.",
+  "tags": [
+    "science",
+    "curiosity",
+    "shorts",
+    "Pip and Ray"
+  ],
+  "sources": [],
+  "science_reviewed": false,
+  "lines": [
+    {
+      "speaker": "PIP",
+      "text": "Ow! My EYES! I barely touched this onion... and I'm CRYING?!",
+      "beat": "zap"
+    },
+    {
+      "speaker": "RAY",
+      "text": "You're not sad. The onion... sprayed you.",
+      "beat": "hook"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Sprayed me?! With WHAT?!",
+      "beat": "ask"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Cutting an onion breaks its cells... and that starts a tiny chemical factory. Watch...",
+      "beat": "watch"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Inside the onion, sulfur compounds wait quietly. But when the knife breaks the cells, two enzymes jump out... and build a brand-new GAS!",
+      "beat": "explain"
+    },
+    {
+      "speaker": "RAY",
+      "text": "That gas floats up... right into your eyes.",
+      "beat": "explain1b"
+    },
+    {
+      "speaker": "PIP",
+      "text": "A gas? Why would my eyes care about a GAS?!",
+      "beat": "ask2"
+    },
+    {
+      "speaker": "RAY",
+      "text": "The gas lands on the wet surface of your eyes... and STINGS! Tiny nerves in your eyes sound the alarm: something's attacking!",
+      "beat": "explain2"
+    },
+    {
+      "speaker": "RAY",
+      "text": "So your tear glands FLOOD your eyes... to wash the irritant away.",
+      "beat": "explain2b"
+    },
+    {
+      "speaker": "PIP",
+      "text": "So my tears are just... my eyes doing the dishes?!",
+      "beat": "gag"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Ha! Pretty much! And a cold onion lets less of that gas escape... so chill it first, and fewer tears!",
+      "beat": "finale"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Next time... the onion goes in the FRIDGE!",
+      "beat": "react"
+    }
+  ]
+}

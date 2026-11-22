@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "id": "dizziness",
+  "title": "Why Does Spinning Make You Dizzy?",
+  "renderer": "dizziness",
+  "language": "en",
+  "description": "Why Does Spinning Make You Dizzy?\nA Pip and Ray science short. Educational, not medical advice.",
+  "tags": [
+    "science",
+    "curiosity",
+    "shorts",
+    "Pip and Ray"
+  ],
+  "sources": [],
+  "science_reviewed": false,
+  "lines": [
+    {
+      "speaker": "PIP",
+      "text": "Whoa whoa whoa... why is the room STILL spinning?! I STOPPED!",
+      "beat": "zap"
+    },
+    {
+      "speaker": "RAY",
+      "text": "The room stopped. Your ears didn't.",
+      "beat": "hook"
+    },
+    {
+      "speaker": "PIP",
+      "text": "My EARS?! I'm dizzy... not deaf!",
+      "beat": "ask"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Deep inside each ear, you have three tiny loops... the semicircular canals. And they're full of fluid. Watch...",
+      "beat": "watch"
+    },
+    {
+      "speaker": "RAY",
+      "text": "When you spin, that fluid lags behind... and bends tiny hairs inside the loop. That bend tells your brain: we're SPINNING!",
+      "beat": "explain"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Keep spinning, and the fluid catches up. The hairs straighten... and your brain thinks everything is still.",
+      "beat": "explain1b"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Okay... so what happens when I STOP?",
+      "beat": "ask2"
+    },
+    {
+      "speaker": "RAY",
+      "text": "The fluid keeps going! It bends the hairs the OTHER way... so your brain hears SPINNING, while your eyes see STILL.",
+      "beat": "explain2"
+    },
+    {
+      "speaker": "RAY",
+      "text": "That mixed signal... IS the dizziness.",
+      "beat": "explain2b"
+    },
+    {
+      "speaker": "PIP",
+      "text": "So I just... wait for my ear juice to stop sloshing?",
+      "beat": "gag"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Ha! Exactly! A few seconds, the fluid settles, the hairs straighten... and the world stops spinning.",
+      "beat": "finale"
+    },
+    {
+      "speaker": "PIP",
+      "text": "My ears are basically two tiny cups of coffee!",
+      "beat": "react"
+    }
+  ]
+}

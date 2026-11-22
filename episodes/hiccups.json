@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "id": "hiccups",
+  "title": "Why Do We Hiccup?",
+  "renderer": "hiccups",
+  "language": "en",
+  "description": "Why Do We Hiccup?\nA Pip and Ray science short. Educational, not medical advice.",
+  "tags": [
+    "science",
+    "curiosity",
+    "shorts",
+    "Pip and Ray"
+  ],
+  "sources": [],
+  "science_reviewed": false,
+  "lines": [
+    {
+      "speaker": "PIP",
+      "text": "Hic! Hic! Oh no. RAY! I have the hiccups... and they will NOT stop!",
+      "beat": "zap"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Relax, Pip. It is just your diaphragm throwing a tiny tantrum.",
+      "beat": "hook"
+    },
+    {
+      "speaker": "PIP",
+      "text": "My dia-WHAT? Is that a muscle or a dinosaur?",
+      "beat": "ask"
+    },
+    {
+      "speaker": "RAY",
+      "text": "It is the big breathing muscle under your lungs. And sometimes... it suddenly squeezes all on its own.",
+      "beat": "explain"
+    },
+    {
+      "speaker": "PIP",
+      "text": "But WHY? Did I offend it somehow?",
+      "beat": "ask2"
+    },
+    {
+      "speaker": "RAY",
+      "text": "You probably triggered it yourself. Eating too fast, fizzy drinks, even getting excited can irritate the nerves that run it.",
+      "beat": "explain1b"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Nerves?! My belly is bossed around by NERVES?",
+      "beat": "gag"
+    },
+    {
+      "speaker": "RAY",
+      "text": "By the vagus and phrenic nerves, yes. They tell the diaphragm when to move. Irritate them... and it spasms.",
+      "beat": "explain2"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Okay, but that squeaky HIC... where does the sound come from?",
+      "beat": "ask3"
+    },
+    {
+      "speaker": "RAY",
+      "text": "The instant your diaphragm yanks air in, a little gate in your throat, the glottis, slams shut. That slam... is the hic.",
+      "beat": "explain2b"
+    },
+    {
+      "speaker": "PIP",
+      "text": "A slamming gate in my throat. Incredible. Hic!",
+      "beat": "gag2"
+    },
+    {
+      "speaker": "RAY",
+      "text": "And here is the weird part: nobody knows for sure WHY we hiccup. One theory says it is a leftover reflex from ancient ancestors who breathed through gills.",
+      "beat": "watch"
+    },
+    {
+      "speaker": "PIP",
+      "text": "You are telling me I have FISH technology in my chest?! Hic!",
+      "beat": "gag3"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Maybe! Hiccups usually fade on their own. Sip some water slowly... and let the reflex calm down.",
+      "beat": "finale"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Fine. I will out-wait my own throat. SCIENCE!",
+      "beat": "react"
+    }
+  ]
+}

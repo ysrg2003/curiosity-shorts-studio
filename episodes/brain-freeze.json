@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "id": "brain-freeze",
+  "title": "Why Does Ice Cream Give You Brain Freeze?",
+  "renderer": "brain_freeze",
+  "language": "en",
+  "description": "Why Does Ice Cream Give You Brain Freeze?\nA Pip and Ray science short. Educational, not medical advice.",
+  "tags": [
+    "science",
+    "curiosity",
+    "shorts",
+    "Pip and Ray"
+  ],
+  "sources": [],
+  "science_reviewed": false,
+  "lines": [
+    {
+      "speaker": "RAY",
+      "text": "Pip! SLOW DOWN! You just grabbed your forehead... what happened?!",
+      "beat": "zap"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Ow ow ow! Brain freeze! That ice cream went straight to my HEAD!",
+      "beat": "zap"
+    },
+    {
+      "speaker": "RAY",
+      "text": "But nothing touched your head! The cold is in your MOUTH! So why does your FOREHEAD hurt?!",
+      "beat": "hook"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Wait... yeah! How does ice cream... freeze my BRAIN?!",
+      "beat": "ask"
+    },
+    {
+      "speaker": "RAY",
+      "text": "It doesn't! Your brain is perfectly warm. Watch what really happens...",
+      "beat": "watch"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Doctors' best theory: when extreme cold slams the roof of your mouth, tiny blood vessels NARROW... then quickly WIDEN again! That sudden change fires a pain signal up a huge nerve... the trigeminal nerve!",
+      "beat": "explain"
+    },
+    {
+      "speaker": "PIP",
+      "text": "A nerve? But then... why does my FOREHEAD hurt?!",
+      "beat": "ask2"
+    },
+    {
+      "speaker": "RAY",
+      "text": "That nerve also covers your face and forehead! So your brain reads the alarm... from the wrong address. It feels the pain in your head... not your mouth!",
+      "beat": "explain2"
+    },
+    {
+      "speaker": "PIP",
+      "text": "So my brain... blamed the wrong address?!",
+      "beat": "gag"
+    },
+    {
+      "speaker": "RAY",
+      "text": "Ha! Exactly! And the fix is easy... press your tongue on the roof of your mouth to warm it back up!",
+      "beat": "finale"
+    },
+    {
+      "speaker": "PIP",
+      "text": "Whoa... my tongue is a tiny heater!",
+      "beat": "react"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "video_count": 1,
+  "max_videos_per_run": 20,
+  "draft_model": "qwen3:4b",
+  "voice_default": "kokoro",
+  "channel_id": "UCEawmiljBdHvnTScqnpPftw",
+  "publication_default": "private",
+  "notes": "Count 1 is the default. The per-run cap is an editable resource safeguard, not a claim that all counts fit the free allowance."
+}
