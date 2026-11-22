@@ -54,7 +54,7 @@ def test_failed_reference_retrieval_is_bounded_across_both_queries(monkeypatch):
     def article(url):reads.append(url);raise OSError('synthetic unavailable reference')
     monkeypatch.setattr(autonomy,'article',article)
     with pytest.raises(autonomy.ResearchUnavailable) as error:autonomy.research('Synthetic question?','synthetic mechanism')
-    assert len(reads)==10 and searches==['Synthetic question?']
+    assert len(reads)==10 and searches==['synthetic mechanism','Synthetic question?']
     assert len(error.value.diagnostics['retrieval_attempts'])==10
 
 
@@ -66,4 +66,43 @@ def test_backup_mechanism_query_is_used_when_reference_budget_remains(monkeypatc
     monkeypatch.setattr(autonomy,'wiki_links',lambda index:[{'*':'https://example.edu/article'}])
     monkeypatch.setattr(autonomy,'article',lambda url:{'url':url,'text':'Synthetic evidence. '*50})
     sources,audit=autonomy.research('Synthetic question?','synthetic mechanism')
-    assert len(sources)==2 and searches==['Synthetic question?','synthetic mechanism']
+    assert len(sources)==2 and searches==['synthetic mechanism','Synthetic question?']
+
+
+def test_both_query_pools_are_discovered_before_reference_budget_and_reads_are_interleaved(monkeypatch):
+    monkeypatch.setattr(autonomy, 'public_url', lambda url: url)
+    searches = []; reads = []
+    def pages(query):
+        searches.append(query)
+        offset = 10 if query == 'synthetic mechanism' else 20
+        return [page(offset + i) for i in range(3)]
+    monkeypatch.setattr(autonomy, 'wiki_pages', pages)
+    monkeypatch.setattr(autonomy, 'wiki_links', lambda index: [{'*': f'https://host{index}-{i}.edu/article'} for i in range(8)])
+    def article(url):
+        assert searches == ['synthetic mechanism', 'Synthetic question?']
+        reads.append(url)
+        raise OSError('Synthetic unavailable source fixture')
+    monkeypatch.setattr(autonomy, 'article', article)
+    with pytest.raises(autonomy.ResearchUnavailable) as found:
+        autonomy.research('Synthetic question?', 'synthetic mechanism')
+    assert len(reads) == 10
+    assert reads[:4] == ['https://host10-0.edu/article', 'https://host20-0.edu/article',
+                         'https://host11-0.edu/article', 'https://host21-0.edu/article']
+    audit = found.value.diagnostics
+    assert audit['all_query_discovery_precedes_reference_reads']
+    assert {r['discovery_query'] for r in audit['retrieval_attempts']} == set(searches)
+
+
+def test_unavailable_mechanism_search_does_not_prevent_exact_question_discovery(monkeypatch):
+    searches = []
+    monkeypatch.setattr(autonomy, 'public_url', lambda url: url)
+    def pages(query):
+        searches.append(query)
+        if query == 'synthetic mechanism': raise OSError('Synthetic unavailable discovery')
+        return [page()]
+    monkeypatch.setattr(autonomy, 'wiki_pages', pages)
+    monkeypatch.setattr(autonomy, 'wiki_links', lambda index: [{'*': 'https://example.edu/fixture'}])
+    monkeypatch.setattr(autonomy, 'article', lambda url: {'url': url, 'text': 'Synthetic source fixture. ' * 40})
+    sources, audit = autonomy.research('Synthetic question?', 'synthetic mechanism')
+    assert len(sources) == 2 and searches == ['synthetic mechanism', 'Synthetic question?']
+    assert audit['discovery'][0]['status'] == 'unavailable'
