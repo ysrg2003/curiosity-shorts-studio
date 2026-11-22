@@ -14,19 +14,29 @@ def source_pack(topic,sources,budget=9500):
     each=max(1200,budget//max(1,len(sources)))
     packed=[]
     for source in sources:
-        text=source['text'];spans=segmenter.segment(text);best=None
+        text=source['text'];spans=segmenter.segment(text)
         scores=[sum(term in span.sent.lower() for term in terms) for span in spans]
-        for i,span in enumerate(spans):
-            score=0
-            for j in range(i,len(spans)):
-                end=spans[j].end
-                if end-span.start>each:break
-                score+=scores[j]
-                candidate=(score,end-span.start,-span.start,span.start,end)
-                if best is None or candidate>best:best=candidate
-        # One contiguous original span. Never splice distant claims or fabricate adjacency.
+        def window(width):
+            best=None
+            for i,span in enumerate(spans):
+                score=0
+                for j in range(i,len(spans)):
+                    end=spans[j].end
+                    if end-span.start>width:break
+                    score+=scores[j]
+                    candidate=(score,end-span.start,-span.start,span.start,end)
+                    if best is None or candidate>best:best=candidate
+            return best
+        best=window(each);opening=''
+        if best and best[3]>0:
+            # Preserve origin cues such as author/date/history without splicing
+            # them into the evidence passage or expanding the source budget.
+            opening=text[:600]
+            best=window(each-len(opening))
         excerpt=text[best[3]:best[4]].strip() if best else ''
-        packed.append({'url':source['url'],'title':source.get('title',''),'text':excerpt})
+        entry={'url':source['url'],'title':source.get('title',''),'text':excerpt}
+        if opening:entry['document_opening']=opening
+        packed.append(entry)
     return packed
 
 
