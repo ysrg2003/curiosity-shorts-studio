@@ -6,7 +6,7 @@ from urllib.request import Request, urlopen
 
 # Positive classes avoid regex shorthand, lookarounds and JSON quote/escape ambiguity.
 # Single spaces keep grammar and Python split() word counting in agreement.
-WORD = r"""[A-Za-z0-9][-A-Za-z0-9',.!?:;()%/]*"""
+WORD = r"""[A-Za-z0-9][-A-Za-z0-9',.!?:;()%/]{0,23}"""
 WORD_BOUNDS = {'PIP': (8, 12), 'RAY': (20, 24)}
 LAYOUT = (
     ('pip_open', 'PIP', 'dialogue'),
@@ -136,10 +136,10 @@ def probe(endpoint='http://127.0.0.1:11434'):
                                  for speaker in ('PIP', 'RAY')})
     payload = {'model': MODEL, 'prompt': 'A synthetic formatting test only. Return JSON with pip set to test and ray set to test. Each string must contain exactly one word. Do not add a topic, story or scientific facts.',
                'format': constraints, 'stream': False, 'think': False,
-               'options': {'num_ctx': 2048, 'num_predict': 160, 'temperature': 0, 'seed': 1, 'num_thread': 4}}
+               'options': {'num_ctx': 2048, 'num_predict': 512, 'temperature': 0, 'seed': 1, 'num_thread': 4}}
     request = Request(endpoint.rstrip('/') + '/api/generate', data=json.dumps(payload).encode(),
                       headers={'Content-Type': 'application/json'})
-    with urlopen(request, timeout=180) as response:
+    with urlopen(request, timeout=240) as response:
         result = json.load(response)
     try:
         obj = json.loads(result.get('response', ''))
@@ -153,6 +153,12 @@ def probe(endpoint='http://127.0.0.1:11434'):
                     and result.get('done') is True and result.get('done_reason') == 'stop')
     return {'accepted': accepted, 'manifest_verified': True, 'episode_content_supplied': False,
             'conflicting_one_word_prompt': True,
+            'response_characters': len(result.get('response', '')) if isinstance(result.get('response', ''), str) else -1,
+            'json_object': isinstance(obj, dict), 'expected_keys': shape,
+            'done': result.get('done') is True,
+            'done_reason': result.get('done_reason') if result.get('done_reason') in {'stop', 'length', 'load'} else 'unrecognized',
+            'thinking_characters': len(thinking) if isinstance(thinking, str) else -1,
+            'largest_nonspace_run': max((len(part) for part in result.get('response', '').split()), default=0) if isinstance(result.get('response', ''), str) else -1,
             'word_counts': {key: len(obj[key].split()) for key in ('pip', 'ray')
                             if shape and isinstance(obj[key], str)},
             'prompt_tokens': result.get('prompt_eval_count'), 'output_tokens': result.get('eval_count'),
