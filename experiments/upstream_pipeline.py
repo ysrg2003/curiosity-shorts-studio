@@ -63,6 +63,21 @@ class LocalSpeech:
         sf.write(out_path,audio,rate,subtype='PCM_16');return out_path
 
 
+
+def extra_lint(code):
+    """A generic contract check for generated-only vector scenes, not topic repair."""
+    import ast
+    try:tree=ast.parse(code)
+    except SyntaxError as error:return [f'Python syntax is invalid near line{error.lineno}. Return a complete valid scene file.']
+    unsupported={'SVGMobject','OpenGLSVGMobject','ImageMobject','add_sound'}
+    found=set()
+    for node in ast.walk(tree):
+        if isinstance(node,ast.Call):
+            name=node.func.id if isinstance(node.func,ast.Name) else node.func.attr if isinstance(node.func,ast.Attribute) else ''
+            if name in unsupported:found.add(name)
+    return [f'{name}requires an asset that this render contract does not supply. Use self-contained Manim vector primitives and VGroups, with no files or added audio.' for name in sorted(found)]
+
+
 def isolated_manim(code_file,out_media_dir,quality='l',resolution=None):
     """Upstream's render hook, with no host credentials/network/source tree mounted."""
     code_file=Path(code_file).resolve();out_media_dir=Path(out_media_dir).resolve();out_media_dir.mkdir(parents=True,exist_ok=True)
@@ -100,6 +115,8 @@ def main():
     # Same generic benchmark profile for every input. No source-specific prompts/scenes.
     script.SCRIPT_PROMPT+='\nBENCHMARK PROFILE OVERRIDE: exactly 2 scenes,70 to 100 spoken words TOTAL. Each scene shows a different step in the source mechanism. Depict actual objects and spatial relationships, not generic labeled-card flowcharts. This short benchmark is not the final production-length video.'
     manim_r._run_manim=isolated_manim
+    upstream_lint=manim_r.lint_manim_code
+    manim_r.lint_manim_code=lambda code,social_mode=False:upstream_lint(code,social_mode=social_mode)+extra_lint(code)
     def strict_visual(scene,duration_sec,run_dir,llm,cfg,theme_seed=None):
         clip=manim_r.render_manim_scene(scene,duration_sec,run_dir/'manim',llm,quality='l',max_retries=2,resolution=(960,540))
         return clip,'video'
@@ -114,7 +131,8 @@ def main():
             with scrubbed_subprocesses():result=pipeline.run_pipeline(source,cfg,llm,LocalSpeech())
         except Exception as error:
             folder=Path(a.out)/f'case-{index}';folder.mkdir(parents=True,exist_ok=True)
-            diagnostic={'kind':type(error).__name__,'model_calls':llm.calls,'complete_video':False,'render_or_lint_error':getattr(error,'stderr','')}
+            from curiosity.remote_ai import ModelOutputInvalid,ModelRequestFailed
+            diagnostic={'kind':type(error).__name__,'model_calls':llm.calls,'complete_video':False,'render_or_lint_error':getattr(error,'stderr',''),'response_shape':error.metadata if isinstance(error,(ModelOutputInvalid,ModelRequestFailed)) else {}}
             (folder/'failure.json').write_text(json.dumps(diagnostic,indent=2))
             raise RuntimeError('Upstream comparison stopped. See failure.json. No preset fallback.') from None
         report={'source':source,'upstream':UPSTREAM,'revision':REVISION,'model':llm.calls[0].get('model',a.model) if llm.calls else a.model,'llm_calls':llm.calls,
