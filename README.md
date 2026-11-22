@@ -11,7 +11,7 @@
 - `starter`: أمثلة موجودة مسبقا، لا يثبت اختيار موضوع أو بحث جديد.
 - `new-topic`: موضوع وروابط اختيارية يقدمها المشغل، لا يثبت الاستقلال الكامل.
 - `automatic`: يتجاهل حقول الموضوع والمصادر. يقترح النموذج أسئلة، ويتحقق من عدم تكرارها في السجل المتاح، ويسترجع نصوصا من Wikimedia ومراجع مؤسسية مقروءة، ثم يكتب الحوار وSEO واتجاهات المشاهد.
-- `backend=ollama`: نموذج محلي على المعالج. مجاني من جهة خدمة النموذج، لكنه بطيء وقد لا ينتج كودا صالحا ضمن المهلة.
+- `backend=ollama`: نموذج محلي على المعالج. يستخدم `qwen3:4b-instruct` مع تثبيت بصمة النموذج وفحص دعمه لعدم التفكير قبل الاستدلال. ليس الاسم المختصر الذي قد يشير إلى إصدار يفكر دائما. مجاني من جهة خدمة النموذج، لكنه بطيء وقد لا ينتج كودا صالحا ضمن المهلة.
 - `backend=openrouter-free`: يحتاج Actions secret باسم `OPENROUTER_API_KEY`. أدخله مباشرة في إعدادات GitHub، لا في الكود أو رسائل المحادثة. يستخدم النموذج المجاني الصريح `particle-ai/particle-1:free` عبر OpenRouter، وليس الاختيار العشوائي داخل الموجه المجاني. يتحقق قبل كل طلب من السعر الصفري، ودعم المخرجات المنظمة، ودعم `reasoning_effort=none` للتوليد و`low` لفحوص الأدلة. إذا تغيرت هذه القدرات يتوقف، ولا يرجع إلى نموذج مدفوع. هذا اختيار تجريبي لم يثبت بعد نجاح فيديو كامل.
 - `voice=kokoro`: صوت محلي بعد تنزيل النموذج، والأصوات تختلف عن الأصل. `edge` خيار خدمة خارجية غير مضمون التوفر.
 
@@ -51,7 +51,7 @@
 
 ## تشغيل محلي
 
-Python3.11،FFmpeg،espeak-ng وDocker مطلوبة للمواضيع الجديدة. تحتاج Manim إلى Cairo وPango. لمسار Ollama شغّل النموذج `qwen3:4b` أولا.
+Python3.11،FFmpeg،espeak-ng وDocker مطلوبة للمواضيع الجديدة. تحتاج Manim إلى Cairo وPango. لمسار Ollama شغّل النموذج `qwen3:4b-instruct` أولا.
 
 ```sh
 python -m venv .venv
@@ -59,6 +59,8 @@ python -m venv .venv
 pip install -e '.[test,local-voice,research,free-ai,motion,generated-motion]'
 pytest -q
 docker build -t curiosity-upstream-manim:0.20.1 -f experiments/Dockerfile.manim .
+ollama pull qwen3:4b-instruct
+python -m curiosity.local_ai
 MODE=automatic VIDEO_COUNT=1 VOICE=kokoro CURIOSITY_LLM_BACKEND=ollama python -m curiosity.batch
 ```
 
@@ -74,5 +76,7 @@ MODE=automatic VIDEO_COUNT=1 VOICE=kokoro CURIOSITY_LLM_BACKEND=ollama python -m
 - Kokoro،Apache-2.0،وkokoro-onnx،MIT،وخط Quicksand،OFL.
 
 لا توجد أجزاء من مستودعات خاصة في هذه الإضافة. ظهور هذا المستودع لا يمنح تلقائيا ترخيصا مفتوحا للكود والرسوم المملوكة لصاحب المشروع؛ تراخيص المكونات الخارجية مستقلة. راجع `docs/SOURCES.md` وملفات تراخيص الخطوط.
+
+النموذج المحلي: https://ollama.com/library/qwen3:4b-instruct وhttps://docs.ollama.com/capabilities/thinking .
 
 مراجع الخدمة: https://openrouter.ai/openrouter/free وhttps://openrouter.ai/docs/api_reference/limits وhttps://openrouter.ai/docs/guides/routing/model-variants/free .
