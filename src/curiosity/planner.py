@@ -5,11 +5,92 @@ from html.parser import HTMLParser
 from pathlib import Path
 import re
 import socket
+import time
+import math
+from email.utils import parsedate_to_datetime
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
 from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
 from .spec import write_json
 
-USER_AGENT = 'CuriosityStudio/0.1 (private educational video production)'
+USER_AGENT = 'CuriosityStudio/0.1 (https://github.com/ysrg2003/curiosity-shorts-studio; educational research bot)'
+WIKIMEDIA_INTERVAL = 7.0
+_SOURCE_CACHE = {}
+_SOURCE_FAILURES = {}
+_PROVIDER_STOPS = {}
+_LAST_WIKIMEDIA_REQUEST = None
+
+
+class SourceReadError(OSError):
+    def __init__(self, metadata):
+        super().__init__('Public source request unavailable; inspect typed diagnostics')
+        self.metadata = metadata
+
+
+class SourceValidationError(ValueError):
+    def __init__(self, code, message):
+        super().__init__(message)
+        self.metadata = {'kind': 'source_validation', 'reason_code': code}
+
+
+def source_error(error):
+    # Never persist arbitrary server bodies, exception prose, or response headers.
+    return dict(error.metadata) if isinstance(error, (SourceReadError, SourceValidationError)) else {}
+
+
+def retry_after_seconds(value):
+    if not value: return None
+    try:
+        return max(0, int(value)) if str(value).isdigit() else max(0, math.ceil(parsedate_to_datetime(value).timestamp() - time.time()))
+    except (ValueError, TypeError, OverflowError): return None
+
+
+def source_bytes(url):
+    """One bounded public read. A provider stop lasts for this process, with no retry."""
+    global _LAST_WIKIMEDIA_REQUEST
+    public_url(url)
+    host = urlparse(url).hostname.lower()
+    wikimedia = host == 'wikipedia.org' or host.endswith('.wikipedia.org') or host == 'wikimedia.org' or host.endswith('.wikimedia.org')
+    provider = 'wikimedia' if wikimedia else host
+    if provider in _PROVIDER_STOPS:
+        raise SourceReadError({**_PROVIDER_STOPS[provider], 'network_attempted': False})
+    if url in _SOURCE_FAILURES:
+        raise SourceReadError({**_SOURCE_FAILURES[url], 'network_attempted': False})
+    if url in _SOURCE_CACHE: return _SOURCE_CACHE[url]
+    if wikimedia and _LAST_WIKIMEDIA_REQUEST is not None:
+        time.sleep(max(0, WIKIMEDIA_INTERVAL - (time.monotonic() - _LAST_WIKIMEDIA_REQUEST)))
+    if wikimedia: _LAST_WIKIMEDIA_REQUEST = time.monotonic()
+    try:
+        with build_opener(PublicRedirects()).open(Request(url, headers={'User-Agent': USER_AGENT}), timeout=25) as response:
+            final = public_url(response.url)
+            raw = response.read(2_000_001)
+            if len(raw) > 2_000_000: raise SourceValidationError('source_too_large', 'Source exceeds 2 MB')
+            result = (final, raw, response.headers.get('Content-Type', ''))
+    except HTTPError as error:
+        metadata = {'kind': 'http_error', 'provider': provider, 'http_status': int(error.code),
+                    'retry_after_seconds': retry_after_seconds(error.headers.get('Retry-After')) if error.headers else None,
+                    'provider_stop': error.code in (401, 403, 429, 503), 'network_attempted': True}
+        _SOURCE_FAILURES[url] = metadata
+        if metadata['provider_stop']: _PROVIDER_STOPS[provider] = metadata
+        raise SourceReadError(metadata) from None
+    except URLError as error:
+        metadata = {'kind': 'transport_error', 'provider': provider, 'reason_type': type(error.reason).__name__,
+                    'provider_stop': False, 'network_attempted': True}
+        _SOURCE_FAILURES[url] = metadata
+        raise SourceReadError(metadata) from None
+    if wikimedia and 'json' in result[2]:
+        parsed = json.loads(result[1].decode('utf-8'))
+        if isinstance(parsed, dict) and 'error' in parsed:
+            code = str(parsed['error'].get('code', 'unclassified_api_error'))
+            if not re.fullmatch(r'[a-z0-9_-]{1,50}', code): code = 'unclassified_api_error'
+            metadata = {'kind': 'api_error', 'provider': provider, 'api_code': code,
+                        'provider_stop': True, 'network_attempted': True}
+            _PROVIDER_STOPS[provider] = metadata
+            raise SourceReadError(metadata)
+    if wikimedia:
+        if len(_SOURCE_CACHE) >= 64: _SOURCE_CACHE.pop(next(iter(_SOURCE_CACHE)))
+        _SOURCE_CACHE[url] = result
+    return result
 
 
 class TextOnly(HTMLParser):
@@ -40,15 +121,11 @@ class PublicRedirects(HTTPRedirectHandler):
 
 
 def fetch(url):
-    public_url(url)
-    with build_opener(PublicRedirects()).open(Request(url,headers={'User-Agent':USER_AGENT}), timeout=25) as r:
-        public_url(r.url)
-        raw = r.read(2_000_001)
-        if len(raw)>2_000_000: raise ValueError('Source exceeds 2 MB')
-        text = raw.decode('utf-8',errors='replace')
-        if 'json' in r.headers.get('Content-Type',''): return json.loads(text)
-        parser = TextOnly(); parser.feed(text)
-        return re.sub(r'\s+',' ',' '.join(parser.parts))[:18000]
+    _, raw, content_type = source_bytes(url)
+    text = raw.decode('utf-8', errors='replace')
+    if 'json' in content_type: return json.loads(text)
+    parser = TextOnly(); parser.feed(text)
+    return re.sub(r'\s+', ' ', ' '.join(parser.parts))[:18000]
 
 
 def discover(topic,queries=None):
