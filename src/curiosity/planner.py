@@ -79,7 +79,8 @@ def discover(topic,queries=None):
 
 
 def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='http://127.0.0.1:11434', index=1, source_records=None):
-    from .storyboard import source_pack,validate_story,ask,schema,SYSTEM
+    from .storyboard import source_pack,validate_story,ask
+    from .story_slots import SYSTEM as draft_system,materialize,prompt_layout,preflight
     if source_records is not None:
         if source_urls:raise ValueError('Do not mix supplied URLs with retrieved source records')
         sources=source_records
@@ -96,19 +97,23 @@ def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='
     write_json(target.with_suffix('.research.json'),{'topic':topic,'sources':[{'url':x['url'],'title':x.get('title',''),'excerpt_sha256':hashlib.sha256(x['text'].encode()).hexdigest(),'excerpt_characters':len(x['text'])} for x in packed], 'note':'Source text is processed in memory. Only literal evidence quotes used by the draft are retained in episode JSON.'})
     from .evidence import catalog,drafting_schema,bind
     sentences=catalog(packed)
-    draft_system=SYSTEM.replace('For every Ray factual line include a literal 8 to 40 word quote from the supplied source that supports it, with source_index. Evidence is not narration.', 'For every factual Ray line select existing quote_id values from the supplied sentence catalog. Never write or edit a quote. Use evidence from at least two source records. Evidence IDs are not narration.')
-    draft_system+='\nUse exactly 13 lines, with Pip first and last. Every evidence item has only quote_id, chosen from the catalog. The program will bind the original sentence, not invent missing support.'
+    specification=preflight(sentences)
+    write_json(target.with_suffix('.specification.json'),specification)
     audit=[];feedback=[]
     for attempt in range(3):
         from .remote_ai import ModelOutputInvalid
-        try:obj,stats=ask(model,draft_system,{'topic':topic,'variation':index,'sources':packed,'sentence_catalog':sentences,'revision_feedback':feedback},drafting_schema(sentences),endpoint,42+index+attempt)
+        try:raw,stats=ask(model,draft_system,{'topic':topic,'variation':index,'sources':packed,'sentence_catalog':sentences,'layout':prompt_layout(),'revision_feedback':feedback},drafting_schema(sentences),endpoint,42+index+attempt)
         except ModelOutputInvalid as error:
             audit.append({'attempt':attempt+1,'rejected':'incomplete_or_schema_invalid_model_output','response_shape':error.metadata})
             feedback=['Return one complete valid JSON object matching every requested field and type. No preamble. Do not truncate the script.']
             continue
-        from .staging import stage_story
-        obj,staging=stage_story(obj)
-        shape={'speakers':[x.get('speaker') for x in obj.get('lines',[])], 'beats':[x.get('beat') for x in obj.get('lines',[])], 'words':sum(len(x.get('text','').split()) for x in obj.get('lines',[])), 'staging':staging}
+        write_json(target.with_suffix(f'.attempt-{attempt+1}.json'),{'diagnostic_only':True,'not_a_verified_episode':True,'model_output':raw})
+        try:obj=materialize(raw,sentences)
+        except ValueError as error:
+            audit.append({'attempt':attempt+1,'generation':stats,'rejected':str(error)})
+            feedback=['Return all named slots with exactly the required fields and word bounds. Do not edit source evidence.']
+            continue
+        shape={'speakers':[x.get('speaker') for x in obj.get('lines',[])], 'beats':[x.get('beat') for x in obj.get('lines',[])], 'words':sum(len(x.get('text','').split()) for x in obj.get('lines',[])), 'generation_specification':specification, 'narration_modified':False}
         try:
             obj=bind(obj,sentences)
             checks=validate_story(obj,packed)
@@ -119,7 +124,7 @@ def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='
             if verdict.get('supported') is not True or verdict.get('issues'):raise ValueError('Source check: '+'; '.join(verdict.get('issues',[]) or ['unsupported claims']))
             break
         except ValueError as error:
-            feedback=[str(error),'Rewrite the complete script. Keep exactly 13 lines and 170 to 230 spoken words. Do not pad with unsupported claims. Preserve literal evidence quotes and clear character/explanation balance.']
+            feedback=[str(error),'Rewrite all 13 named slots. Keep the supplied word bounds and layout. Do not pad with unsupported claims. Select original evidence IDs without changing quotes.']
             audit.append({'attempt':attempt+1,'generation':stats,'story_shape':shape,'rejected':str(error)})
     else:
         write_json(target.with_suffix('.audit.json'),{'attempts':audit,'accepted':False})
@@ -130,7 +135,10 @@ def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='
     obj.update(visual_engine='generated-manim',schema_version=1,id=re.sub(r'[^a-z0-9]+','-',topic.lower()).strip('-')[:65]+f'-{index}',renderer='generic',language='en',
                sources=[x['url'] for x in packed],science_reviewed=False,
                generator={'model':selected_model,'source_alignment':'evidence-checked-draft','human_review_still_needed':True})
-    write_json(target,obj);write_json(target.with_suffix('.audit.json'),{'attempts':audit,'accepted':True,'not_a_guarantee_of_factual_accuracy':True})
-    from .spec import read_spec
-    read_spec(target)
+    from .spec import validate_spec
+    try:validate_spec(obj)
+    except ValueError as error:
+        write_json(target.with_suffix('.audit.json'),{'attempts':audit,'accepted':False,'failure_stage':'episode_specification','rejected':str(error)})
+        raise
+    write_json(target,obj);write_json(target.with_suffix('.audit.json'),{'attempts':audit,'accepted':True,'episode_specification_accepted':True,'not_a_guarantee_of_factual_accuracy':True})
     return obj
