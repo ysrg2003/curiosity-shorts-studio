@@ -48,12 +48,15 @@ def verify():
     installed,shown=read_metadata()
     if not installed or installed.get('digest')!=MANIFEST:raise ValueError('Local model manifest differs from the inspected non-thinking instruct model')
     caps=shown.get('capabilities')
-    if not isinstance(caps,list) or 'completion' not in caps or 'thinking' in caps:raise ValueError('Pinned instruct model has missing or conflicting capabilities')
-    # The pinned provider instruct model is non-thinking. Legacy Go templates may
-    # omit thinking metadata in this server version; absence alone proves nothing.
-    if 'thinking' in shown and (not isinstance(shown['thinking'],dict) or shown['thinking'].get('values')!=[False]):raise ValueError('Pinned instruct model has conflicting non-thinking-only metadata')
-    origin='explicit_show_metadata' if 'thinking' in shown else 'pinned_instruct_manifest_and_capabilities'
-    return {'local_model':MODEL,'manifest_verified':True,'non_thinking_only':True,'thinking_control_source':origin,'inference_performed':False}
+    if not isinstance(caps,list) or 'completion' not in caps:raise ValueError('Pinned instruct model has missing completion capability')
+    # This inspected instruct manifest reports a broad thinking capability but no
+    # controls. Verify actual think=false behavior, never infer it from absence.
+    if 'thinking' in shown:
+        control=shown['thinking'];values=control.get('values') if isinstance(control,dict) else None
+        if not isinstance(values,list) or not any(value is False for value in values):raise ValueError('Pinned instruct model has conflicting non-thinking-only metadata')
+    tested=probe()
+    if not tested['accepted']:raise ValueError('Local reasoning-off probe failed: '+json.dumps(tested))
+    return {'local_model':MODEL,'manifest_verified':True,'reasoning_off_probe_passed':True,'runtime_thinking_output_rejected':True,'probe':tested,'note':'A tiny response probe does not establish generation quality or factual support'}
 
 
 if __name__=='__main__':
