@@ -20,10 +20,10 @@ def test_topic_acceptance_must_be_explicit_literal_true(monkeypatch, decision, a
         result = {'answer': 'Synthetic fixture observations remain fictional in this bounded unit test.',
                   'answer_quote_ids': ['S0Q0', 'S1Q0'],
                   'supported': True, 'source_assessments': [
-            {'source_index': i, 'usable': True, 'reason': 'Synthetic source fixture'} for i in range(2)],
+            {'source_index': i, 'usable': True, 'reason': 'current_observation_or_mechanism'} for i in range(2)],
             'observable_quote_ids': ['S0Q0'], 'mechanism_quote_ids': ['S1Q0'], 'issues': []}
         if decision != 'missing':
-            result['topic_assessment'] = {'suitable': decision, 'reason': 'Synthetic topic fixture'}
+            result['topic_assessment'] = {'suitable': decision, 'reason': 'fits_short_visual_science'}
         return result, {}
     monkeypatch.setattr(storyboard, 'ask', ask)
     ok, report = evidence.screen('Synthetic fixture question?', records(), 'synthetic')
@@ -57,7 +57,7 @@ def test_failed_topic_gate_never_starts_script_audio_or_video(monkeypatch, tmp_p
     monkeypatch.setattr(autonomy, 'research', lambda *a, **k: (records(), {}))
     def assess(*args, **kwargs):
         return {'topic_assessment': {'suitable': False, 'reason': 'Synthetic unsuitable-topic fixture'},
-                'source_assessments': [{'source_index': i, 'usable': True, 'reason': 'Synthetic fixture'} for i in range(2)],
+                'source_assessments': [{'source_index': i, 'usable': True, 'reason': 'current_observation_or_mechanism'} for i in range(2)],
                 'supported': True, 'observable_quote_ids': ['S0Q0'], 'mechanism_quote_ids': ['S1Q0'], 'issues': []}, {}
     monkeypatch.setattr(storyboard, 'ask', assess)
     def forbidden(*args, **kwargs): raise AssertionError('A downstream stage started despite failed upstream acceptance')
@@ -157,3 +157,26 @@ def test_accepted_draft_uses_generation_contract_not_posthoc_beat_repair(monkeyp
     assert preflight['spoken_word_bounds'] == [176, 228] and preflight['post_generation_narration_repair'] is False
     assert [x['text'] for x in obj['lines']] == [raw['slots'][name]['text'] for name, _, _ in story_slots.LAYOUT]
     assert obj['science_reviewed'] is False
+
+
+def test_failed_contract_preserves_untrusted_draft_for_inspection_without_starting_media(monkeypatch, tmp_path):
+    from curiosity.remote_ai import ModelOutputInvalid
+    raw, _ = fixture(); saved = deepcopy(raw)
+    monkeypatch.setattr(storyboard, 'source_pack', lambda topic, sources: sources)
+    calls = []
+    def reject(*args, **kwargs):
+        calls.append(args[2])
+        raise ModelOutputInvalid({'validation': 'schema_invalid', 'violations': [
+            {'path': ['slots', 'pip_open', 'text'], 'rule': 'pattern', 'words': 7}]}, model_output=deepcopy(raw))
+    monkeypatch.setattr(storyboard, 'ask', reject)
+    target = tmp_path / 'test.json'
+    with pytest.raises(ValueError, match='source/story checks'):
+        planner.draft('Synthetic fixture question?', target, source_records=records())
+    assert len(calls) == 3 and not target.exists() and raw == saved
+    diagnostics = sorted(tmp_path.glob('test.invalid-contract-*.json'))
+    assert len(diagnostics) == 3
+    for path in diagnostics:
+        record = json.loads(path.read_text())
+        assert record['diagnostic_only'] and record['untrusted_model_output'] and record['not_a_verified_episode']
+        assert record['model_output'] == raw
+    assert calls[1]['revision_feedback'][0]['previous_contract_failure']['violations'][0]['words'] == 7
