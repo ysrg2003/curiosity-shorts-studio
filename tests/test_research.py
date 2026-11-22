@@ -234,3 +234,109 @@ def test_reference_api_stop_aborts_before_articles(monkeypatch):
     monkeypatch.setattr(autonomy,'article',lambda url:pytest.fail('Provider stop reached an article'))
     with pytest.raises(autonomy.ResearchUnavailable) as found:autonomy.research('Synthetic question?','synthetic mechanism')
     assert found.value.diagnostics['provider_pause']['http_status']==403
+
+
+def test_subject_query_is_model_supplied_and_precedes_mechanism_and_full_question(monkeypatch):
+    searched=[]
+    monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    def pages(query):
+        searched.append(query)
+        return [{'pageid':len(searched),'fullurl':'https://en.wikipedia.org/wiki/Synthetic','title':query,'extract':'Synthetic observable fixture. '*30}]
+    monkeypatch.setattr(autonomy,'wiki_pages',pages)
+    monkeypatch.setattr(autonomy,'wiki_links',lambda index:[{'url':'https://fixture.edu/article','context':'Synthetic fixture motion'}])
+    monkeypatch.setattr(autonomy,'article',lambda url:{'url':url,'title':'Synthetic fixture motion','text':'Synthetic fixture motion. '*40})
+    sources,audit=autonomy.research('Why does a synthetic fixture move?','synthetic vector motion','synthetic fixture')
+    assert searched==['synthetic fixture','synthetic vector motion','Why does a synthetic fixture move?']
+    assert sources[0]['title']=='synthetic fixture' and audit['subject_query_is_not_fact']
+
+
+def test_later_more_relevant_document_is_not_suppressed_by_same_publisher(monkeypatch):
+    monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    monkeypatch.setattr(autonomy,'wiki_pages',lambda query:[page()])
+    monkeypatch.setattr(autonomy,'wiki_links',lambda index:[{'url':'https://fixture.edu/early'},{'url':'https://fixture.edu/later'}])
+    reads=[]
+    def article(url):
+        reads.append(url)
+        return {'url':url,'title':'Synthetic fixture motion' if url.endswith('later') else 'Unrelated fictional biography','text':'Synthetic fixture motion. '*40 if url.endswith('later') else 'Unrelated fictional account. '*40}
+    monkeypatch.setattr(autonomy,'article',article)
+    sources,audit=autonomy.research('Why does a synthetic fixture move?','synthetic mechanism')
+    assert len(reads)==2 and sources[1]['url'].endswith('later')
+    assert len(audit['document_candidates'])==2 and len(audit['retrieval_attempts'])==2
+
+
+def test_document_collection_finishes_bounded_queue_before_four_source_selection(monkeypatch):
+    monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    monkeypatch.setattr(autonomy,'wiki_pages',lambda query:[page()])
+    monkeypatch.setattr(autonomy,'wiki_links',lambda index:[{'url':f'https://host{i}.edu/article'} for i in range(7)])
+    monkeypatch.setattr(autonomy,'article',lambda url:{'url':url,'title':'Synthetic fixture motion' if 'host5.' in url else 'Fictional record','text':'Fictional source text. '*40})
+    sources,audit=autonomy.research('Why does a synthetic fixture move?','synthetic mechanism')
+    assert len(audit['retrieval_attempts'])==6 and len(sources)==4
+    assert any('host5.' in source['url'] for source in sources)
+    assert len({autonomy.publisher(source['url']) for source in sources})==4
+
+
+def abstract_record(text=None):
+    return {'hitCount':1,'result':{'id':'123','pmid':'123','source':'MED','title':'Fictional synthetic abstract','pubYear':'2001',
+            'abstractText':text if text is not None else 'This fictional abstract describes only a synthetic fixture used in a unit test. '*14,
+            'affiliation':'This metadata is not source evidence and must not be propagated.'}}
+
+
+def test_pubmed_uses_matching_structured_public_record_and_explicit_abstract_scope(monkeypatch):
+    seen=[]
+    monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    def fetch(url):seen.append(url);return abstract_record()
+    monkeypatch.setattr(autonomy,'fetch',fetch)
+    source=autonomy.article('https://pubmed.ncbi.nlm.nih.gov/123')
+    assert '/article/MED/123?' in seen[0] and 'resultType=core' in seen[0]
+    assert source['pmid']=='123' and source['source_scope']=='abstract_only' and source['publication_year']=='2001'
+    assert source['text']==abstract_record()['result']['abstractText'].strip()
+    assert 'affiliation' not in source and 'metadata is not source evidence' not in source['text']
+
+
+@pytest.mark.parametrize('change,code',[
+    ('wrong_id','abstract_identity_mismatch'),('wrong_source','abstract_identity_mismatch'),
+    ('wrong_pmid','abstract_identity_mismatch'),('missing','abstract_missing'),('short','abstract_too_short')])
+def test_structured_abstract_cannot_mismatch_identity_or_pad_short_text(monkeypatch,change,code):
+    data=abstract_record()
+    if change=='wrong_id':data['result']['id']='456'
+    if change=='wrong_source':data['result']['source']='OTHER'
+    if change=='wrong_pmid':data['result']['pmid']='456'
+    if change=='missing':data['result'].pop('abstractText')
+    if change=='short':data['result'].update(abstractText='A tiny fictional abstract.',title='Fictional metadata. '*1000)
+    monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    monkeypatch.setattr(autonomy,'fetch',lambda url:data)
+    with pytest.raises(planner.SourceValidationError) as found:autonomy.article('https://pubmed.ncbi.nlm.nih.gov/123')
+    assert found.value.metadata['reason_code']==code
+
+
+def test_abstract_scope_is_preserved_in_model_source_pack():
+    from curiosity.storyboard import source_pack
+    source={'url':'https://example.edu/fixture','title':'Fictional abstract','text':'A fictional synthetic abstract supports only this fixture sentence. '*15,
+            'source_scope':'abstract_only','publication_year':'2001','pmid':'123','retrieval_url':'https://example.edu/api/fixture'}
+    packed=source_pack('Synthetic fixture?', [source])[0]
+    assert all(packed[key]==source[key] for key in ('source_scope','publication_year','pmid','retrieval_url'))
+
+
+def test_subject_query_cannot_be_missing_unrelated_or_question_filler(monkeypatch):
+    for phrase in ('','unrelated planets','why does'):
+        calls=[]
+        def ask(*args):
+            calls.append(args)
+            return {'candidates':[{'question':'Why does a synthetic fixture move?','search_terms':'synthetic mechanism','subject_query':phrase} for _ in range(3)]},{}
+        monkeypatch.setattr(autonomy,'ask',ask)
+        with pytest.raises(autonomy.ResearchUnavailable):autonomy.questions('synthetic',[])
+        assert len(calls)==2 and 'subject_query' in calls[0][3]['properties']['candidates']['items']['required']
+
+
+def test_europepmc_reads_are_serial_paced_and_cached(monkeypatch):
+    clock=[100.0];sleeps=[];calls=[]
+    monkeypatch.setattr(planner,'_LAST_EUROPEPMC_REQUEST',None)
+    monkeypatch.setattr(planner.time,'monotonic',lambda:clock[0])
+    def sleep(seconds):sleeps.append(seconds);clock[0]+=seconds
+    monkeypatch.setattr(planner.time,'sleep',sleep)
+    def response(request,timeout):calls.append(request.full_url);clock[0]+=0.25;return Response(request.full_url)
+    install_opener(monkeypatch,response)
+    first='https://www.ebi.ac.uk/europepmc/webservices/rest/article/MED/123?fixture=1'
+    second='https://www.ebi.ac.uk/europepmc/webservices/rest/article/MED/456?fixture=2'
+    planner.source_bytes(first);planner.source_bytes(first);planner.source_bytes(second)
+    assert len(calls)==2 and sleeps==[0.75]
