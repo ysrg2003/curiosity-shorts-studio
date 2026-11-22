@@ -55,3 +55,13 @@ def test_anatomical_template_cannot_illustrate_unrelated_claim():
 def test_relevant_excerpt_keeps_neighboring_qualification():
     sources=[{'url':'https://example.org','text':'Unrelated opening. Goosebumps involve tiny muscles. This result was observed in mice. Unrelated ending.'}]
     assert 'observed in mice' in source_pack('Why goosebumps?',sources)[0]['text']
+
+
+def test_bibliography_and_external_links_never_enter_selectable_passage():
+    body='The fictional motor turns its axle and raises a flag in this demonstration. '*30
+    appendix='\n== References ==\nA misleading fictional paper title claims the flag uses magic. '*20
+    source={'url':'https://example.edu/fiction','text':body+appendix}
+    packed=source_pack('Why does the fictional flag use magic?',[source])[0]
+    assert 'magic' not in packed['text'] and packed['text'] in body
+    from curiosity.storyboard import content_body
+    assert content_body(body+'\n=== External links ===\nFake mechanism title.')==body.rstrip()
