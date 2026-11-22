@@ -32,8 +32,18 @@ The demo's finale is qualified: feeding pauses the fasting cleaning pattern, not
 
 ## Quality boundaries
 
-1. Kokoro voices are not the Ana/Andrew voices. The present local timing adapter estimates word spans. It is not a forced aligner.
-2. Bespoke rigs preserve the drawing style and narrative structure. Arbitrary new topics use animated causal cards, not a promise of a custom anatomical simulation.
+1. Kokoro voices are not the Ana/Andrew voices. The local adapter aligns text to native model phoneme durations, with limited interpolation for reduced function words. These are not guaranteed perfect word boundaries.
+2. Bespoke rigs preserve the drawing style and narrative structure. New topics use bounded, data-driven Manim Cairo templates, including causal diagrams and a stylized skin/hair mechanism. This is not a promise of a custom anatomical simulation for every topic.
 3. A small local model can invent or overstate a claim even with source text. Read research records and source indices; contested mechanisms must remain qualified.
 4. One complete free render does not establish unlimited free scale or YouTube publication success. OAuth, upload quota, processing and platform checks are separate.
 5. Internet, hardware, electricity and account allowance are finite. No paid API is configured, and no paid resource is intentionally selected.
+
+
+## Motion component
+
+- https://github.com/ManimCommunity/manim/ : Community animation engine, pinned to 0.20.1 in the motion extra.
+- https://github.com/ManimCommunity/manim/blob/main/LICENSE.community : MIT component license, independent from project artwork ownership.
+- https://docs.manim.community/en/stable/ : Cairo scene/text/animation API.
+- https://pypi.org/project/manim/0.20.1/ : Python 3.11 or later dependency requirement for the pinned release.
+
+No third-party showcase videos or scenes were copied. The repository contains its own bounded scene templates built on the library. Article text is processed in memory for drafting; source metadata and the draft's supporting quotes are retained, not a full article archive.
