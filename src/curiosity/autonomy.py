@@ -388,7 +388,7 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
             details=error.metadata if isinstance(error,ModelOutputInvalid) else getattr(error,'diagnostics',{})
             if isinstance(error,ModelOutputInvalid):
                 status='source_assessment_contract_invalid'
-                details={'model_contract':details,'research':report}
+                details={'model_contract':details,'untrusted_original_output':error.model_output,'research':report}
             else:status='research_unavailable'
             audit.append({'question':item['question'],'status':status,'error_type':type(error).__name__,'details':details})
             if details.get('provider_pause'):
