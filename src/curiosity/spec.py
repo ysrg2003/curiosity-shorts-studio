@@ -9,7 +9,11 @@ RENDERERS = {'brain_freeze', 'dizziness', 'onion_tears', 'hiccups', 'stomach_gro
 
 
 def read_spec(path):
-    obj = json.loads(Path(path).read_text())
+    return validate_spec(json.loads(Path(path).read_text()))
+
+
+def validate_spec(obj):
+    """Validate the episode contract before it can authorize any media stage."""
     if obj.get('schema_version') != 1:
         raise ValueError('schema_version must be 1')
     if not obj.get('id') or not all(c.isalnum() or c in '-_' for c in obj['id']):
