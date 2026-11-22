@@ -75,6 +75,7 @@ def test_word_pattern_accepts_contractions_and_rejects_punctuation_padding():
     assert re.fullmatch(slots.word_pattern('PIP'), "Wait, why can't these 2.5 balloons stay here?")
     assert not re.fullmatch(slots.word_pattern('PIP'), 'word word word word word word word ...')
     assert not re.fullmatch(slots.word_pattern('PIP'), 'word  word word word word word word word')
+    assert not re.fullmatch(slots.word_pattern('PIP'), 'x' * 25 + ' word' * 7)
 
 
 def test_materialized_layout_does_not_replace_two_source_or_length_checks():
@@ -124,7 +125,7 @@ def test_real_endpoint_probe_checks_complete_output_not_just_request_success(mon
               'done': True, 'done_reason': 'length' if mode == 'length' else 'stop', 'eval_count': 80}
     def open_request(request, timeout):
         payload = json.loads(request.data)
-        assert payload['think'] is False and payload['options']['num_predict'] == 160
+        assert payload['think'] is False and payload['options']['num_predict'] == 512
         assert 'exactly one word' in payload['prompt']
         assert set(payload['format']['properties']) == {'pip', 'ray'}
         assert payload['format']['additionalProperties'] is False
