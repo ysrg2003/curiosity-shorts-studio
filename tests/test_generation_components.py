@@ -318,10 +318,10 @@ def test_safe_rate_limit_metadata_never_retains_raw_header_or_provider_text(monk
 def test_quota_reserve_covers_connection_and_bounded_count1_calls(monkeypatch):
     import requests
     monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-private-secret')
-    remaining=[27]
+    remaining=[30]
     monkeypatch.setattr(requests,'get',lambda *a,**k:SimpleNamespace(status_code=200,json=lambda:{'data':{'free_model_daily_requests':{'remaining':remaining[0]}}}))
     assert remote_ai.free_quota_status()['request_budget']=='below_conservative_reserve'
-    remaining[0]=28
+    remaining[0]=31
     assert remote_ai.free_quota_status()['request_budget']=='sufficient_for_bounded_attempt'
 
 
@@ -381,6 +381,6 @@ def test_batch_checks_configured_request_reserve_before_any_topic_inference(monk
     monkeypatch.setattr(remote_ai,'free_quota_status',budget)
     monkeypatch.setattr(autonomy,'select_and_research',lambda *a,**k:pytest.fail('No inference without a verified request reserve'))
     with pytest.raises(RuntimeError,match='No inference attempted'):batch.main()
-    assert seen==[52]
+    assert seen==[58]
     audit=json.loads((tmp_path/'drafts/quota-budget.json').read_text())
     assert audit['video_count']==2 and not audit['inference_performed']
