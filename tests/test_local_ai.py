@@ -64,3 +64,18 @@ def test_local_scene_adapter_also_rejects_unexpected_thinking(monkeypatch):
     monkeypatch.setenv('CURIOSITY_LLM_BACKEND','ollama')
     monkeypatch.setattr(module,'urlopen',lambda *a,**k:io.StringIO(json.dumps({'thinking':'synthetic disallowed reasoning','response':'synthetic scene code'})))
     with pytest.raises(remote_ai.ModelOutputInvalid):module.LocalModel(local_ai.MODEL).generate('synthetic')
+
+
+def test_metadata_inspection_emits_only_controlled_public_shape():
+    raw={'capabilities':['completion','synthetic-secret-that-must-not-be-logged'], 'thinking':{'values':[False,'high','synthetic-private-value']},'template':'synthetic-private-template','extra':'synthetic-private-account-data'}
+    result=local_ai.snapshot({'digest':local_ai.MANIFEST},raw)
+    assert result['manifest_matches'] and result['known_capabilities']==['completion']
+    assert result['known_thinking_values']==[False,'high'] and not result['inference_performed']
+    assert 'synthetic-' not in json.dumps(result)
+
+
+def test_metadata_workflow_has_no_inference_or_service_key():
+    from curiosity.spec import ROOT
+    text=(ROOT/'.github/workflows/check-local-model.yml').read_text()
+    assert '--inspect-only' in text and 'contents: read' in text and 'persist-credentials: false' in text
+    assert 'secrets.' not in text and 'curiosity.batch' not in text and 'schedule:' not in text
