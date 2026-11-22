@@ -86,6 +86,14 @@ def request(prompt,system,schema=None,json_mode=False):
         def _body(self,response):
             body=super()._body(response)
             shape['http_status']=int(response.status_code)
+            if response.status_code==429:
+                for header,name,ceiling in [('Retry-After','retry_after_seconds',604800),('X-RateLimit-Reset','rate_reset_unix_ms',4102444800000)]:
+                    value=(getattr(response,'headers',{}) or {}).get(header)
+                    try:number=int(value)
+                    except (ValueError,TypeError):continue
+                    if 0<=number<=ceiling:shape[name]=number
+                metadata=(body.get('error') or {}).get('metadata') or {}
+                if isinstance(metadata,dict):shape['provider_code_present']=metadata.get('provider_code') is not None
             resolved=body.get('model')
             if isinstance(public_models,set) and isinstance(resolved,str):shape['resolved_public_model']=resolved if resolved in public_models else 'unlisted'
             choices=body.get('choices') or []
@@ -142,12 +150,15 @@ def free_quota_status():
     try:
         response=requests.get('https://openrouter.ai/api/v1/key',headers={'Authorization':f'Bearer {key}'},timeout=25,allow_redirects=False)
         status=int(response.status_code)
-        result={'http_status':status,'daily_counter':'unknown','inference_performed':False}
+        result={'http_status':status,'daily_counter':'unknown','count1_budget':'unknown','inference_performed':False}
         if status!=200:return result
         data=response.json().get('data',{})
         counter=data.get('free_model_daily_requests') or {}
         remaining=counter.get('remaining')
-        if type(remaining) is int:result['daily_counter']='at_limit' if remaining<=0 else 'has_remaining'
+        if type(remaining) is int:
+            result['daily_counter']='at_limit' if remaining<=0 else 'has_remaining'
+            # Count1 worst case:1selection+3drafts+3reviews+5visuals*3code attempts=22calls, plus2connection checks.
+            result['count1_budget']='sufficient_for_bounded_attempt' if remaining>=24 else 'below_conservative_reserve'
         return result
     except Exception:
-        return {'http_status':'unavailable','daily_counter':'unknown','inference_performed':False}
+        return {'http_status':'unavailable','daily_counter':'unknown','count1_budget':'unknown','inference_performed':False}
