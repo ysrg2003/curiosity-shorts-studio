@@ -81,6 +81,7 @@ def test_real_owner_http_adapter_plaintext_and_json(monkeypatch):
     assert all(url=='https://openrouter.ai/api/v1/chat/completions' for url,_ in calls)
     assert all(kwargs['json']['model']=='openrouter/free' and 'tools' not in kwargs['json'] and 'models' not in kwargs['json'] for _,kwargs in calls)
     assert calls[1][1]['json']['response_format']['json_schema']['schema']['additionalProperties'] is False
+    assert all(kwargs['json']['reasoning_effort']=='low' for _,kwargs in calls)
 
 
 def test_real_child_never_inherits_model_or_repository_secrets(monkeypatch):
@@ -241,3 +242,17 @@ def test_draft_only_retries_output_invalid_not_account_errors(monkeypatch,tmp_pa
     monkeypatch.setattr(storyboard,'ask',account_error)
     with pytest.raises(remote_ai.ModelRequestFailed):planner.draft('Synthetic?',tmp_path/'second.json',source_records=sources)
     assert len(calls)==1
+
+
+def test_only_public_catalog_model_id_and_numeric_reasoning_count_enter_diagnostics(monkeypatch):
+    adapter=pytest.importorskip('ai_router.providers.openai_compatible')
+    monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-unit-test-only')
+    monkeypatch.setattr(remote_ai,'check_free_catalog',lambda:{'synthetic/public-free'})
+    model=['synthetic/public-free']
+    monkeypatch.setattr(adapter.requests,'post',lambda *a,**k:SimpleNamespace(status_code=200,json=lambda:{'model':model[0],'choices':[{'finish_reason':'stop','message':{'content':'{"ok":true}'}}],'usage':{'cost':0,'completion_tokens_details':{'reasoning_tokens':123,'arbitrary':'must not be retained'}}}))
+    _,stats=remote_ai.request('synthetic','synthetic',json_mode=True)
+    assert stats['response_shape']['resolved_public_model']=='synthetic/public-free' and stats['usage']['reasoning_tokens']==123
+    assert 'arbitrary' not in str(stats)
+    model[0]='synthetic private value'
+    _,stats=remote_ai.request('synthetic','synthetic',json_mode=True)
+    assert stats['response_shape']['resolved_public_model']=='unlisted' and 'private value' not in str(stats)
