@@ -228,7 +228,7 @@ def test_http_errors_retain_only_safe_shape_and_do_not_retry(monkeypatch):
 def test_draft_only_retries_output_invalid_not_account_errors(monkeypatch,tmp_path):
     from curiosity import planner,storyboard
     import json
-    sources=[{'url':'https://example.edu/a','text':'synthetic evidence a'},{'url':'https://example.org/b','text':'synthetic evidence b'}]
+    sources=[{'url':'https://example.edu/a','text':'This synthetic source sentence contains enough words for a bounded evidence test.'},{'url':'https://example.org/b','text':'Another synthetic source sentence contains enough words for a bounded evidence test.'}]
     monkeypatch.setattr(storyboard,'source_pack',lambda topic,sources:sources)
     calls=[]
     def invalid(*a,**k):
@@ -261,7 +261,7 @@ def test_only_public_catalog_model_id_and_numeric_reasoning_count_enter_diagnost
 
 def test_live_catalog_guard_requires_zero_price_and_explicit_reasoning_off_support(monkeypatch):
     import io,json
-    model={'id':remote_ai.MODEL,'pricing':{'prompt':'0','completion':'0'},'supported_parameters':['response_format','structured_outputs','reasoning_effort'],'reasoning':{'mandatory':False,'supported_efforts':['none']}}
+    model={'id':remote_ai.MODEL,'pricing':{'prompt':'0','completion':'0'},'supported_parameters':['response_format','structured_outputs','reasoning_effort'],'reasoning':{'mandatory':False,'supported_efforts':['none','low']}}
     monkeypatch.setattr(remote_ai,'urlopen',lambda *a,**k:io.StringIO(json.dumps({'data':[model]})))
     assert remote_ai.MODEL in remote_ai.check_free_catalog()
     model['pricing']['completion']='0.000001'
@@ -318,10 +318,10 @@ def test_safe_rate_limit_metadata_never_retains_raw_header_or_provider_text(monk
 def test_quota_reserve_covers_connection_and_bounded_count1_calls(monkeypatch):
     import requests
     monkeypatch.setenv('OPENROUTER_API_KEY','synthetic-private-secret')
-    remaining=[24]
+    remaining=[27]
     monkeypatch.setattr(requests,'get',lambda *a,**k:SimpleNamespace(status_code=200,json=lambda:{'data':{'free_model_daily_requests':{'remaining':remaining[0]}}}))
     assert remote_ai.free_quota_status()['request_budget']=='below_conservative_reserve'
-    remaining[0]=25
+    remaining[0]=28
     assert remote_ai.free_quota_status()['request_budget']=='sufficient_for_bounded_attempt'
 
 
@@ -381,6 +381,6 @@ def test_batch_checks_configured_request_reserve_before_any_topic_inference(monk
     monkeypatch.setattr(remote_ai,'free_quota_status',budget)
     monkeypatch.setattr(autonomy,'select_and_research',lambda *a,**k:pytest.fail('No inference without a verified request reserve'))
     with pytest.raises(RuntimeError,match='No inference attempted'):batch.main()
-    assert seen==[46]
+    assert seen==[52]
     audit=json.loads((tmp_path/'drafts/quota-budget.json').read_text())
     assert audit['video_count']==2 and not audit['inference_performed']
