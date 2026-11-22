@@ -158,3 +158,7 @@ Encyclopedia bibliography, notes, further-reading and external-link sections are
 ### Source-bound scope diagnostics
 
 Source assessment first emits cited material conditions/alternatives before its answer. The scope audit first emits specific findings with original sentence IDs, then its decision flags. A rejection without a valid cited finding remains a failure but does not trigger a blind retry. A passing audit must have no findings or issues and all positive scope flags. The bounded fresh assessment receives original sources plus cited findings, never the rejected answer. Failure artifacts now retain packed original source passages, scope plans and both audits. Citation validation proves a cited sentence exists, not that its interpretation is scientifically correct. Independent entailment and all downstream gates still apply.
+
+### Retained scope-audit failures
+
+Scope explanations are diagnostics, not video narration: each allows up to1600characters within the existing four-finding and5000output-token caps. No source, evidence or semantic decision requirement changes. Invalid scope output remains failed, is not edited or shortened, and is retained alongside original source passages, selected evidence and prior entailment. Invalid source-assessment originals are retained too. A formatting failure is labelled separately from a scientific rejection and cannot start media or an automatic retry.
