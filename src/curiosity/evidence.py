@@ -95,4 +95,10 @@ def screen(question,sources,model,endpoint='http://127.0.0.1:11434'):
         from .entailment import source_answer
         support=source_answer(question,verdict,entries)
     accepted=accepted and answer_valid and support['accepted']
-    return accepted,{'verdict':verdict,'model':stats,'assessment_attempts':attempts,'independent_entailment':support,'source_records_referenced':len(groups),'source_records_usable':len(usable),'source_assessments_complete':complete,'source_decisions_consistent':consistent,'topic_suitability_accepted':topic_ok,'approved_source_indices':sorted(groups) if accepted else [],'accepted':accepted,'not_a_truth_guarantee':True}
+    import hashlib
+    selected_ids=list(dict.fromkeys(chosen+answer_ids))
+    evidence_snapshot=[{'quote_id':key,**entries[key]} for key in selected_ids if key in entries]
+    snapshot_sources=[{'source_index':index,'url':source['url'],'title':source.get('title',''),
+                       'source_scope':source.get('source_scope','unspecified_excerpt'),
+                       'excerpt_sha256':hashlib.sha256(source['text'].encode()).hexdigest()} for index,source in enumerate(sources)]
+    return accepted,{'verdict':verdict,'selected_original_evidence':evidence_snapshot,'source_snapshot':snapshot_sources,'model':stats,'assessment_attempts':attempts,'independent_entailment':support,'source_records_referenced':len(groups),'source_records_usable':len(usable),'source_assessments_complete':complete,'source_decisions_consistent':consistent,'topic_suitability_accepted':topic_ok,'approved_source_indices':sorted(groups) if accepted else [],'accepted':accepted,'not_a_truth_guarantee':True}
