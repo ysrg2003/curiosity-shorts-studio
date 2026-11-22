@@ -176,7 +176,7 @@ def test_remote_path_preserves_same_full_contract_and_specific_diagnostics(monke
 def source_contract_fixture():
     sources = [{'url': 'https://example.org/fixture', 'text': 'Synthetic objects move inside this fictional bounded test fixture.'},
                {'url': 'https://example.net/fixture', 'text': 'This fictional fixture describes synthetic objects moving inside a bounded test.'}]
-    verdict = {'topic_assessment': {'suitable': True, 'reason': 'fits_short_visual_science'},
+    verdict = {'scope_constraints':[], 'topic_assessment': {'suitable': True, 'reason': 'fits_short_visual_science'},
                'source_assessments': [{'source_index': i, 'usable': True, 'reason': 'current_observation_or_mechanism'} for i in range(2)],
                'answer': sources[0]['text'], 'answer_quote_ids': ['S0Q0', 'S1Q0'], 'supported': True,
                'observable_quote_ids': ['S0Q0'], 'mechanism_quote_ids': ['S1Q0'], 'issues': []}
