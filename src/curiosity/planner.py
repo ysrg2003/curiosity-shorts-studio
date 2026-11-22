@@ -19,6 +19,7 @@ _SOURCE_CACHE = {}
 _SOURCE_FAILURES = {}
 _PROVIDER_STOPS = {}
 _LAST_WIKIMEDIA_REQUEST = None
+_LAST_EUROPEPMC_REQUEST = None
 
 
 class SourceReadError(OSError):
@@ -47,10 +48,11 @@ def retry_after_seconds(value):
 
 def source_bytes(url):
     """One bounded public read. A provider stop lasts for this process, with no retry."""
-    global _LAST_WIKIMEDIA_REQUEST
+    global _LAST_WIKIMEDIA_REQUEST, _LAST_EUROPEPMC_REQUEST
     public_url(url)
     host = urlparse(url).hostname.lower()
     wikimedia = host == 'wikipedia.org' or host.endswith('.wikipedia.org') or host == 'wikimedia.org' or host.endswith('.wikimedia.org')
+    europepmc = host == 'www.ebi.ac.uk' and urlparse(url).path.startswith('/europepmc/')
     provider = 'wikimedia' if wikimedia else host
     if provider in _PROVIDER_STOPS:
         raise SourceReadError({**_PROVIDER_STOPS[provider], 'network_attempted': False})
@@ -59,6 +61,9 @@ def source_bytes(url):
     if url in _SOURCE_CACHE: return _SOURCE_CACHE[url]
     if wikimedia and _LAST_WIKIMEDIA_REQUEST is not None:
         time.sleep(max(0, WIKIMEDIA_INTERVAL - (time.monotonic() - _LAST_WIKIMEDIA_REQUEST)))
+    if europepmc and _LAST_EUROPEPMC_REQUEST is not None:
+        time.sleep(max(0, 1.0 - (time.monotonic() - _LAST_EUROPEPMC_REQUEST)))
+    if europepmc: _LAST_EUROPEPMC_REQUEST = time.monotonic()
     if wikimedia: _LAST_WIKIMEDIA_REQUEST = time.monotonic()
     try:
         with build_opener(PublicRedirects()).open(Request(url, headers={'User-Agent': USER_AGENT}), timeout=25) as response:
@@ -87,7 +92,7 @@ def source_bytes(url):
                         'provider_stop': True, 'network_attempted': True}
             _PROVIDER_STOPS[provider] = metadata
             raise SourceReadError(metadata)
-    if wikimedia:
+    if wikimedia or europepmc:
         if len(_SOURCE_CACHE) >= 64: _SOURCE_CACHE.pop(next(iter(_SOURCE_CACHE)))
         _SOURCE_CACHE[url] = result
     return result
@@ -178,7 +183,7 @@ def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='
         sources=[sources[i] for i in approval['approved_source_indices']]
         packed=source_pack(topic,sources)
     import hashlib
-    write_json(target.with_suffix('.research.json'),{'topic':topic,'sources':[{'url':x['url'],'title':x.get('title',''),'excerpt_sha256':hashlib.sha256(x['text'].encode()).hexdigest(),'excerpt_characters':len(x['text'])} for x in packed], 'note':'Source text is processed in memory. Only literal evidence quotes used by the draft are retained in episode JSON.'})
+    write_json(target.with_suffix('.research.json'),{'topic':topic,'sources':[{'url':x['url'],'title':x.get('title',''),'excerpt_sha256':hashlib.sha256(x['text'].encode()).hexdigest(),'excerpt_characters':len(x['text']),'source_scope':x.get('source_scope','unspecified_excerpt'),'publication_year':x.get('publication_year'),'retrieval_url':x.get('retrieval_url'),'pmid':x.get('pmid')} for x in packed], 'note':'Source text is processed in memory. Only literal evidence quotes used by the draft are retained in episode JSON.'})
     from .evidence import catalog,drafting_schema,bind
     sentences=catalog(packed)
     specification=preflight(sentences)
