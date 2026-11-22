@@ -83,15 +83,61 @@ def inference_schema(value):
             if not (value.get('type') == 'string' and key in {'pattern', 'minLength', 'maxLength'})}
 
 
+def string_contract(schema):
+    """Expose prose limits to the writer, never to the token grammar."""
+    groups = {}
+    def visit(value, path):
+        if not isinstance(value, dict): return
+        if value.get('type') == 'string':
+            limits = {key: value[key] for key in ('minLength', 'maxLength', 'pattern') if key in value}
+            if limits:
+                key = json.dumps(limits, sort_keys=True)
+                groups.setdefault(key, []).append(path or '$')
+        for name, child in value.get('properties', {}).items():
+            visit(child, path + '.' + name if path else name)
+        if isinstance(value.get('items'), dict): visit(value['items'], path + '[]')
+        for name in ('anyOf', 'oneOf', 'allOf'):
+            for child in value.get(name, []): visit(child, path)
+    visit(schema, '')
+    return [{'paths': paths, **json.loads(key)} for key, paths in groups.items()]
+
+
+def schema_failures(obj, schema):
+    """Field/rule/count diagnostics, without copying generated prose or source text."""
+    from itertools import islice
+    from jsonschema import Draft202012Validator
+    errors = list(islice(Draft202012Validator(schema).iter_errors(obj), 13))
+    result = []
+    for error in errors[:12]:
+        item = {'path': list(error.absolute_path), 'rule': error.validator}
+        value = error.instance
+        if isinstance(value, str): item.update(characters=len(value), words=len(value.split()))
+        elif isinstance(value, (list, dict)): item['items'] = len(value)
+        if error.validator in {'minLength', 'maxLength', 'minItems', 'maxItems', 'type', 'pattern'}:
+            item['required'] = error.validator_value
+        result.append(item)
+    return {'violations': result, 'more_violations': len(errors) > 12}
+
+
+def revision_feedback(metadata):
+    """Bounded diagnostic data for a new model attempt, never a repaired output."""
+    return {'instruction': 'Generate a new complete response satisfying every original field and prose limit. Use natural complete sentences. Never concatenate, trim or truncate words. Do not change evidence or factual criteria to fit.',
+            'previous_contract_failure': {key: metadata[key] for key in ('validation', 'violations', 'more_violations') if key in metadata}}
+
+
 def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,effort='none'):
     import os
+    contract = string_contract(schema)
+    if contract:
+        prompt = {'request': prompt, 'prose_output_contract': contract}
+        system += '\nThe prose_output_contract contains the original acceptance limits, including character counts and patterns. Structure is enforced separately. Satisfy all limits naturally; they remain mandatory client checks. Never merge words or cut a sentence to satisfy a limit.'
     if os.environ.get('CURIOSITY_LLM_BACKEND')=='openrouter-free':
         from .remote_ai import request
         obj,stats=request(json.dumps(prompt,ensure_ascii=False),system,schema=inference_schema(schema),effort=effort)
-        from jsonschema import Draft202012Validator
-        if not Draft202012Validator(schema).is_valid(obj):
+        failures = schema_failures(obj, schema)
+        if failures['violations']:
             from .remote_ai import ModelOutputInvalid
-            raise ModelOutputInvalid({'backend':'openrouter-free','validation':'full_client_schema_invalid'})
+            raise ModelOutputInvalid({'backend':'openrouter-free','validation':'full_client_schema_invalid', **failures, 'generation': stats})
         return obj,stats
     payload={'model':model,'system':system,'prompt':json.dumps(prompt,ensure_ascii=False),
              'format':inference_schema(schema),'stream':False,'think':False,'keep_alive':'15m',
@@ -102,12 +148,12 @@ def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,eff
     if result.get('thinking'):raise ModelOutputInvalid({'backend':'ollama','validation':'unexpected_thinking_output'})
     try:obj=object_from_text(result['response'])
     except (ValueError,KeyError,TypeError):raise ModelOutputInvalid({'backend':'ollama','validation':'incomplete_or_invalid_json'}) from None
-    from jsonschema import Draft202012Validator
-    if not Draft202012Validator(schema).is_valid(obj):
-        from .remote_ai import ModelOutputInvalid
-        raise ModelOutputInvalid({'backend':'ollama','validation':'schema_invalid'})
-    return obj,{'prompt_tokens':result.get('prompt_eval_count'),'output_tokens':result.get('eval_count'),
-                'seconds':round(result.get('total_duration',0)/1e9,2),'done_reason':result.get('done_reason')}
+    failures = schema_failures(obj, schema)
+    stats = {'prompt_tokens':result.get('prompt_eval_count'),'output_tokens':result.get('eval_count'),
+             'seconds':round(result.get('total_duration',0)/1e9,2),'done_reason':result.get('done_reason')}
+    if failures['violations']:
+        raise ModelOutputInvalid({'backend':'ollama','validation':'schema_invalid', **failures, 'generation': stats})
+    return obj,stats
 
 
 def schema():
