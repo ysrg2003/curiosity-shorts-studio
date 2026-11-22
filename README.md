@@ -138,3 +138,9 @@ Discovery pages, citation contexts and the read documents are ordered by the pin
 The reranker uses explicit512-token retrieval windows. The original source text remains unchanged for later evidence checks. The separate independent NLI engine retains its no-truncation rule and0.90threshold. Topic/source acceptance, original-evidence binding, complete causal answers, narration and story checks remain mandatory before media.
 
 Every completed source assessment retains exact original sentences selected by its generated verdict, IDs/source indices and source-excerpt hashes, including rejected selections. These are unapproved diagnostics, not accepted facts. No failed answer or quote is silently rewritten.
+
+### Original passage retrieval
+
+Discovery citations retain the original body paragraphs linked to each bibliography ID as well as the citation title. Query/passage relevance orders those contexts, never certifies them. The selected encyclopedia page is fetched as a bounded full-article excerpt rather than treating its introduction as a complete explanation. A failed full-extract read can retain the explicitly labeled introduction, never relabel it as full text.
+
+Read articles are ranked using bounded contiguous sentence windows throughout the extracted text, not only their first512tokens. The source acceptance pool retains one literal contiguous passage per source, its separate opening context and explicit source scope. No invented bridge text, rewritten quotation or concatenated evidence passage is introduced. The same independent source/NLI/story gates remain required before media. General education/government host classes broaden discovery eligibility, not scientific acceptance.
