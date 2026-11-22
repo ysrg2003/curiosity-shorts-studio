@@ -92,3 +92,7 @@ MODE=automatic VIDEO_COUNT=1 VOICE=kokoro CURIOSITY_LLM_BACKEND=ollama python -m
 النموذج المحلي: https://ollama.com/library/qwen3:4b-instruct وhttps://docs.ollama.com/capabilities/thinking .
 
 مراجع الخدمة: https://openrouter.ai/openrouter/free وhttps://openrouter.ai/docs/api_reference/limits وhttps://openrouter.ai/docs/guides/routing/model-variants/free .
+
+### Prose contracts and failure diagnostics
+
+Native inference constrains JSON structure, not prose lengths or word boundaries. The original string limits are supplied separately to the writer and remain mandatory client checks. Failed contracts retain field paths, rules, counts and generation timing without copying generated prose into error metadata. The source-assessment stage can make at most two fresh attempts, with specific contract feedback; it does not repair text or retry a valid negative scientific verdict into approval. Source contract failure is recorded separately from insufficient evidence, and actual retrieval provenance is preserved. A valid JSON response still needs the independent evidence and story gates before any media.
