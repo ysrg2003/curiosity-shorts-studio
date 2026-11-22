@@ -136,3 +136,36 @@ def test_real_endpoint_probe_checks_complete_output_not_just_request_success(mon
     assert checked['accepted'] is accepted
     assert checked['synthetic_response_sample'] == json.dumps(obj)
     assert checked['done_reason'] == result['done_reason']
+
+
+def test_incremental_units_use_bounded_original_word_arrays_without_repair(monkeypatch):
+    from curiosity import storyboard
+    raw,entries=fixture();calls=[]
+    def ask(model,system,prompt,shape,*args,**kwargs):
+        calls.append(prompt)
+        result={'slots':{}}
+        for name in shape['properties']['slots']['properties']:
+            original=deepcopy(raw['slots'][name]);original['words']=original.pop('text').split();result['slots'][name]=original
+            constraints=shape['properties']['slots']['properties'][name]['properties']['words']
+            assert constraints['minItems'] in {8,20} and constraints['maxItems'] in {12,24}
+        if 'title' in shape['properties']:
+            result.update({k:raw[k] for k in ('title','description','tags','uncertainties')})
+        return result,{'synthetic':True}
+    monkeypatch.setattr(storyboard,'ask',ask)
+    result,stats=slots.incremental('synthetic',slots.SYSTEM,{'sources':records(),'sentence_catalog':entries},slots.schema(entries),'http://127.0.0.1:11434',1)
+    assert result==raw and len(calls)==3 and stats['narration_modified'] is False
+    assert len(calls[1]['accepted_previous_dialogue'])==5 and len(calls[2]['accepted_previous_dialogue'])==9
+
+
+def test_incremental_rejects_joined_or_unfinished_word_array_before_next_unit(monkeypatch):
+    from curiosity import storyboard,remote_ai
+    raw,entries=fixture();calls=[]
+    def ask(model,system,prompt,shape,*args,**kwargs):
+        calls.append(True);obj={'slots':{}}
+        for name in shape['properties']['slots']['properties']:
+            item=deepcopy(raw['slots'][name]);item['words']=item.pop('text').split();item['words'][-1]='joinedwordsthatdonotexist';obj['slots'][name]=item
+        obj.update({k:raw[k] for k in ('title','description','tags','uncertainties')})
+        return obj,{}
+    monkeypatch.setattr(storyboard,'ask',ask)
+    with pytest.raises(remote_ai.ModelOutputInvalid):slots.incremental('synthetic',slots.SYSTEM,{'sources':records()},slots.schema(entries),'http://127.0.0.1:11434',1)
+    assert len(calls)==2
