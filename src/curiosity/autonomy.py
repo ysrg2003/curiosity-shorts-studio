@@ -50,7 +50,7 @@ def publisher(url):
 def eligible_reference(url):
     p=urlparse(url);host=(p.hostname or '').lower()
     if p.path.rstrip('/').lower().split('/')[-1] in {'search','query','query.fcgi','entrez'} or set(parse_qs(p.query)) & {'q','query','search','term'}:return False
-    return p.scheme=='https' and (host.endswith('.edu') or any(host==root or host.endswith('.'+root) for root in PUBLISHERS))
+    return p.scheme=='https' and (host.endswith(('.edu','.gov','.ac.uk','.edu.au','.ac.nz')) or any(host==root or host.endswith('.'+root) for root in PUBLISHERS))
 
 
 def questions(model,previous,endpoint='http://127.0.0.1:11434',seed=43):
@@ -90,17 +90,63 @@ def wiki_pages(query):
     return sorted(data.get('query',{}).get('pages',{}).values(),key=lambda page:page.get('index',999))
 
 
-class CitationLinks(HTMLParser):
-    """Read citation context, not bare URL ordering. Context remains untrusted data."""
+def wiki_article(page_id):
+    """One explicitly bounded full-page extract, not an intro mistaken for evidence."""
+    params={'action':'query','pageids':str(page_id),'prop':'extracts|info',
+            'explaintext':1,'inprop':'url','maxlag':5,'format':'json'}
+    data=fetch('https://en.wikipedia.org/w/api.php?'+urlencode(params))
+    pages=data.get('query',{}).get('pages',{})
+    page=pages.get(str(page_id),{})
+    if page.get('pageid')!=page_id or len(page.get('extract',''))<450:
+        raise SourceValidationError('encyclopedia_extract_missing','No matching readable full-page extract')
+    text=page['extract'][:18000]
+    return {'url':public_url(page['fullurl']),'title':page.get('title',''),'text':text,
+            'publisher':'wikipedia.org','source_scope':'encyclopedia_article_excerpt',
+            'extraction_method':'MediaWiki bounded full-page extract API'}
+
+
+class ParagraphCitations(HTMLParser):
+    """Associate bibliography IDs with the surrounding original body paragraph."""
     def __init__(self):
         super().__init__(convert_charrefs=True)
-        self.items=[];self.depth=0;self.urls=[];self.parts=[]
+        self.blocks=[];self.parts=[];self.targets=[];self.contexts={};self.skip=0
+    def handle_starttag(self,tag,attrs):
+        attrs=dict(attrs)
+        if tag in {'script','style'}:self.skip+=1
+        if tag in {'p','li','dd'}:
+            self.blocks.append((tag,self.parts,self.targets));self.parts=[];self.targets=[]
+        if tag=='a' and attrs.get('href','').startswith('#cite_note'):
+            self.targets.append(attrs['href'][1:])
+    def handle_data(self,text):
+        if not self.skip:self.parts.append(text)
+    def handle_endtag(self,tag):
+        if tag in {'script','style'}:self.skip=max(0,self.skip-1)
+        if self.blocks and tag==self.blocks[-1][0]:
+            context=re.sub(r'\s+',' ',' '.join(self.parts)).strip()[:1800]
+            for target in self.targets:
+                existing=self.contexts.setdefault(target,[])
+                if context and context not in existing and len(existing)<3:existing.append(context)
+            _,self.parts,self.targets=self.blocks.pop()
+
+
+class CitationLinks(HTMLParser):
+    """Original citation titles plus their in-article paragraph context, not facts."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.items=[];self.depth=0;self.urls=[];self.parts=[];self.citation_id=''
+    def feed(self,data):
+        super().feed(data)
+        paragraphs=ParagraphCitations();paragraphs.feed(data)
+        for item in self.items:
+            item['citation_context']=item['context']
+            item['body_context']=' '.join(paragraphs.contexts.get(item['citation_id'],[]))
+            item['context']=(item['body_context']+' '+item['citation_context']).strip()[:6600]
     def handle_starttag(self,tag,attrs):
         attrs=dict(attrs)
         if tag=='li':
             if self.depth:self.depth+=1
             elif attrs.get('id','').startswith('cite_note'):
-                self.depth=1;self.urls=[];self.parts=[]
+                self.depth=1;self.urls=[];self.parts=[];self.citation_id=attrs['id']
         if self.depth and tag=='a':
             href=attrs.get('href','')
             if href.startswith(('https://','http://')):self.urls.append(href)
@@ -111,7 +157,7 @@ class CitationLinks(HTMLParser):
             self.depth-=1
             if not self.depth:
                 context=re.sub(r'\s+',' ',' '.join(self.parts)).strip()[:1200]
-                self.items.extend({'url':url,'context':context} for url in dict.fromkeys(self.urls))
+                self.items.extend({'url':url,'context':context,'citation_id':self.citation_id} for url in dict.fromkeys(self.urls))
 
 
 def wiki_links(page_id):
@@ -183,6 +229,9 @@ def research(question,terms,subject_query=""):
     from .entailment import relevance_scores
     page_passages=[(page.get('title','')+'. '+page.get('extract',''))[:6000] or 'Empty discovery result.' for page in pages]
     weights=relevance_scores(question,page_passages)
+    if subject_query:
+        subject_weights=relevance_scores(subject_query,page_passages)
+        weights=[(a+b)/2 for a,b in zip(weights,subject_weights)]
     ordered=sorted(zip(weights,pages),key=lambda row:-row[0])
     # A fixed retrieval shortlist, never a scientific acceptance threshold.
     pages=[page for _,page in ordered[:5]]
@@ -192,8 +241,16 @@ def research(question,terms,subject_query=""):
                           'retrieval_logit':score,'retrieval_only':True,'query':queries[page['query_index']]})
     intro=next((page for page in pages if len(page.get('extract',''))>=450),None)
     if intro:
-        sources.append({'url':public_url(intro['fullurl']),'title':intro.get('title',''),'text':intro['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API','source_scope':'encyclopedia_introduction'})
-        groups.add('wikipedia.org')
+        try:
+            encyclopedia=wiki_article(intro['pageid'])
+        except (ValueError,OSError) as error:
+            details=source_error(error)
+            discovery.append({'page_id':intro['pageid'],'status':'full_extract_unavailable','transport':details})
+            if details.get('provider')=='wikimedia' and details.get('provider_stop'):
+                raise ResearchUnavailable('Discovery provider requested a stop. No further candidate requests or media.',{**report(),'provider_pause':details}) from None
+            # The original intro remains explicitly scoped, never relabeled full text.
+            encyclopedia={'url':public_url(intro['fullurl']),'title':intro.get('title',''),'text':intro['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API','source_scope':'encyclopedia_introduction'}
+        sources.append(encyclopedia);groups.add('wikipedia.org')
     queues=[];reference_candidates=[]
     for page in pages:
         page_id=page['pageid'];query_index=page['query_index']
@@ -238,7 +295,8 @@ def research(question,terms,subject_query=""):
     # The first readable but unrelated paper must not suppress its better references.
     encyclopedias=[source for source in sources if publisher(source['url'])=='wikipedia.org']
     articles=[source for source in sources if publisher(source['url'])!='wikipedia.org']
-    article_weights=relevance_scores(question,[(source.get('title','')+'. '+source['text'])[:6000] for source in articles])
+    from .storyboard import passage_rank
+    article_weights=[passage_rank(question,source['text'],source.get('title','')) for source in articles]
     weighted=sorted(zip(article_weights,articles),key=lambda row:-row[0])
     ranked=[source for _,source in weighted]
     weight_by_url={source['url']:weight for weight,source in weighted}
@@ -320,10 +378,11 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
             sources,report=research(item['question'],item['search_terms'],item.get('subject_query',''))
             from .evidence import screen
             from .storyboard import source_pack
-            relevant,relevance=screen(item['question'],source_pack(item['question'],sources),model,endpoint)
+            packed=source_pack(item['question'],sources,semantic=True)
+            relevant,relevance=screen(item['question'],packed,model,endpoint)
             report['relevance']=relevance
             if not relevant:raise ResearchUnavailable('Readable sources did not directly support the exact question and mechanism.',{'research':report})
-            approved=[sources[index] for index in relevance['approved_source_indices']]
+            approved=[{**sources[index],'text':packed[index]['text'],**({'document_opening':packed[index]['document_opening']} if packed[index].get('document_opening') else {})} for index in relevance['approved_source_indices']]
             return item['question'],approved,{'selection':stats,'candidates':candidates,'rejections':audit,'research':report,'operator_topic_or_source_input':False}
         except (ValueError,OSError) as error:
             details=error.metadata if isinstance(error,ModelOutputInvalid) else getattr(error,'diagnostics',{})
