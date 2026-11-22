@@ -1,0 +1,58 @@
+name: Validate automatic topic and script before media
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: curiosity-script-preflight
+  cancel-in-progress: false
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      CURIOSITY_LLM_BACKEND: ollama
+      OMP_NUM_THREADS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install free research and independent CPU checks
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y zstd
+          python -m pip install -e '.[test,research]'
+      - uses: actions/cache@v4
+        with:
+          path: .state/topics.json
+          key: script-preflight-topics-${{ github.run_id }}
+          restore-keys: generated-topics-
+      - name: Unit and safety checks
+        run: python -m pytest -q
+      - name: Start pinned local drafting model
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 2 https://github.com/ollama/ollama/releases/download/v0.40.17/ollama-linux-amd64.tar.zst -o /tmp/ollama.tar.zst
+          mkdir -p /tmp/ollama
+          tar --zstd -xf /tmp/ollama.tar.zst -C /tmp/ollama
+          /tmp/ollama/bin/ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags; then break; fi
+            sleep 1
+          done
+          /tmp/ollama/bin/ollama pull qwen3:4b-instruct
+          python -m curiosity.local_ai
+      - name: Automatic topic, source and script acceptance only
+        run: python -m curiosity.script_preflight
+      - name: Retain diagnostic scripts, never credentials or model caches
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: script-preflight-diagnostics
+          path: drafts/*.json
+          retention-days: 1
+          if-no-files-found: warn
