@@ -74,41 +74,57 @@ def document_resolution(requested,final,is_pdf):
 
 
 def research(question,terms):
+    # Discover both query pools before any article read can consume the budget.
+    # Mechanism-first text anchors the encyclopedia excerpt; references are interleaved.
+    from itertools import zip_longest
     sources=[];groups=set();attempted=[];discovery=[];seen_pages=set();seen_urls=set()
-    def report():return {'question':question,'queries':list(dict.fromkeys([question,terms])),'publishers':sorted(groups),'discovery':discovery,'retrieval_attempts':attempted,'not_a_truth_guarantee':True}
-    for query in dict.fromkeys([question,terms]):
-        if len(attempted)>=10:break
+    queries=list(dict.fromkeys([terms,question]));pools=[]
+    def report():return {'question':question,'queries':queries,'publishers':sorted(groups),'discovery':discovery,'retrieval_attempts':attempted,'all_query_discovery_precedes_reference_reads':True,'not_a_truth_guarantee':True}
+    for query in queries:
         try:pages=wiki_pages(query)
         except (ValueError,OSError) as error:
-            discovery.append({'query':query,'status':'unavailable','error_type':type(error).__name__});continue
+            discovery.append({'query':query,'status':'unavailable','error_type':type(error).__name__});pools.append([]);continue
         discovery.append({'query':query,'status':'retrieved','page_titles':[page.get('title','') for page in pages]})
-        for page in pages:
+        pools.append(pages)
+    for pages in pools:
+        intro=next((page for page in pages if len(page.get('extract',''))>=450),None)
+        if intro:
+            sources.append({'url':public_url(intro['fullurl']),'title':intro.get('title',''),'text':intro['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API'})
+            groups.add('wikipedia.org');break
+    queues=[]
+    for row in zip_longest(*pools):
+        for query_index,page in enumerate(row):
+            if page is None:continue
             page_id=page.get('pageid')
             if page_id is None or page_id in seen_pages:continue
             seen_pages.add(page_id)
-            if len(page.get('extract',''))>=450 and 'wikipedia.org' not in groups:
-                sources.append({'url':public_url(page['fullurl']),'title':page.get('title',''),'text':page['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API'})
-                groups.add('wikipedia.org')
-            if len(attempted)>=10:break
             try:links=wiki_links(page_id)
             except (ValueError,OSError) as error:
                 discovery.append({'page_id':page_id,'status':'references_unavailable','error_type':type(error).__name__});continue
-            page_attempts=0
+            urls=[]
             for item in links:
                 url=item.get('*',item.get('url',''))
                 if url.startswith('http://'):url='https://'+url[7:]
-                if len(attempted)>=10 or page_attempts>=6:break
-                if not eligible_reference(url) or publisher(url) in groups or url in seen_urls:continue
-                seen_urls.add(url);page_attempts+=1
-                record={'requested_url':url};attempted.append(record)
-                try:
-                    source=article(url);group=publisher(source['url'])
-                    if not eligible_reference(source['url']) or group in groups:
-                        record['status']='ineligible_or_duplicate_resolved_publisher';continue
-                    sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'])
-                except Exception as error:
-                    record.update(status='unreadable',error_type=type(error).__name__);continue
-                if len(groups)>=4:return sources,report()
+                if eligible_reference(url):urls.append(url)
+            queues.append({'page_id':page_id,'query':queries[query_index],'urls':urls,'attempts':0})
+    while len(attempted)<10 and any(item['urls'] and item['attempts']<6 for item in queues):
+        for queue in queues:
+            if len(attempted)>=10:break
+            if queue['attempts']>=6:continue
+            while queue['urls']:
+                url=queue['urls'].pop(0)
+                if publisher(url) not in groups and url not in seen_urls:break
+            else:continue
+            seen_urls.add(url);queue['attempts']+=1
+            record={'requested_url':url,'discovery_page_id':queue['page_id'],'discovery_query':queue['query']};attempted.append(record)
+            try:
+                source=article(url);group=publisher(source['url'])
+                if not eligible_reference(source['url']) or group in groups:
+                    record['status']='ineligible_or_duplicate_resolved_publisher';continue
+                sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'])
+            except Exception as error:
+                record.update(status='unreadable',error_type=type(error).__name__);continue
+            if len(groups)>=4:return sources,report()
     if len(groups)>=2:return sources,report()
     raise ResearchUnavailable('No two readable publisher groups from live research. No unsupported fallback or video.',report())
 
