@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 import subprocess
 from .spec import ROOT, review, write_json
-from .youtube import upload
+from .youtube import upload,write_ledger,UploadRejected,failure_message
 
 
 def git(*args):
@@ -22,7 +22,7 @@ def persist(message):
 
 def check_repository_privacy(is_private, privacy):
     if not is_private and privacy != 'public':
-        raise ValueError('Make the repository private before private or unlisted uploads. Public repository logs and ledger are visible to others.')
+        raise UploadRejected('Make the repository private before private or unlisted uploads. Public repository logs and ledger are visible to others.')
 
 
 def main():
@@ -31,28 +31,29 @@ def main():
     sha=os.environ['VIDEO_SHA256']
     privacy=os.environ.get('PRIVACY','private')
     if not run.isdigit() or not re.fullmatch('[a-zA-Z0-9_-]+',episode) or not re.fullmatch('[0-9a-f]{64}',sha):
-        raise ValueError('Invalid source run, episode ID or SHA256')
+        raise UploadRejected('Invalid source run, episode ID or SHA256')
     if os.environ.get('APPROVAL')!='I reviewed this exact video':
-        raise ValueError('Explicit exact-video approval is required')
+        raise UploadRejected('Explicit exact-video approval is required')
     repo_info=json.loads(subprocess.run(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}'],capture_output=True,text=True,check=True).stdout)
     check_repository_privacy(repo_info.get('private') is True,privacy)
+    os.environ['CURIOSITY_PUBLIC_LEDGER']='0' if repo_info.get('private') is True else '1'
     if not os.environ.get('YOUTUBE_TOKEN_JSON'):
-        raise ValueError('YouTube OAuth secret is not installed')
+        raise UploadRejected('YouTube OAuth secret is not installed')
     info=json.loads(subprocess.run(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/actions/runs/{run}'],capture_output=True,text=True,check=True).stdout)
     if info.get('path')!='.github/workflows/generate.yml' or info.get('conclusion')!='success' or info.get('head_branch')!='main':
-        raise ValueError('Source must be a successful generation run from main in this repository')
+        raise UploadRejected('Source must be a successful generation run from main in this repository')
     subprocess.run(['gh','run','download',run,'--name','video-bundles','--dir','incoming'],check=True)
     candidates=list((ROOT/'incoming').glob('**/'+episode+'/manifest.json'))
-    if len(candidates)!=1:raise ValueError('Expected exactly one matching video bundle')
+    if len(candidates)!=1:raise UploadRejected('Expected exactly one matching video bundle')
     bundle=candidates[0].parent
     review(bundle,sha,accept_draft_science=os.environ.get('SCIENCE_CHECKED')=='true')
     ledger_path=ROOT/'.state/uploads.json'
     ledger_path.parent.mkdir(exist_ok=True)
     ledger=json.loads(ledger_path.read_text()) if ledger_path.exists() else {}
-    if sha in ledger:raise ValueError('Duplicate or uncertain upload exists, refusing automatic retry')
+    if sha in ledger:raise UploadRejected('Duplicate or uncertain upload exists, refusing automatic retry')
     reservation=os.environ['GITHUB_RUN_ID']+':'+os.environ.get('GITHUB_RUN_ATTEMPT','1')
     ledger[sha]={'state':'reserved','reservation':reservation,'source_run':run,'privacy':privacy}
-    write_json(ledger_path,ledger)
+    write_ledger(ledger_path,ledger)
     # A failed push stops before inserting anything. A crash after this commit blocks later retries.
     persist('Reserve reviewed video upload')
     os.environ['CURIOSITY_UPLOAD_RESERVATION']=reservation
@@ -70,4 +71,8 @@ def main():
                 print('Ledger reservation is already persisted. Outcome commit needs manual reconciliation; do not retry upload.')
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+    try:main()
+    except Exception as error:
+        print(failure_message(error))
+        raise SystemExit(1) from None
