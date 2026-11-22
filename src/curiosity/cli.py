@@ -89,9 +89,10 @@ def main(argv=None):
         from .youtube import authorize
         authorize(args.client,args.token)
     elif args.command == 'upload':
-        from .youtube import upload
+        from .youtube import upload,failure_message,UploadUncertain
         Path(args.ledger).parent.mkdir(parents=True,exist_ok=True)
-        print(json.dumps(upload(args.bundle,args.token,args.ledger,args.sha256,args.privacy),indent=2))
+        try:print(json.dumps(upload(args.bundle,args.token,args.ledger,args.sha256,args.privacy),indent=2))
+        except Exception as error:raise UploadUncertain(failure_message(error)) from None
 
 
 if __name__ == '__main__':
