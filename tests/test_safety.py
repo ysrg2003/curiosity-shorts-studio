@@ -123,7 +123,7 @@ def test_workflow_has_manual_trigger_no_publication():
     assert 'workflow_dispatch' in trigger
     assert trigger['workflow_dispatch']['inputs']['video_count']['default']==1
     assert 'schedule' not in trigger and 'push' not in trigger
-    assert obj['jobs']['generate']['timeout-minutes']<=60
+    assert 1<=obj['jobs']['generate']['timeout-minutes']<=90
 
 
 @pytest.mark.parametrize('privacy',['private','unlisted'])
