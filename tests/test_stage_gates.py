@@ -6,10 +6,20 @@ from curiosity import autonomy, batch, evidence, planner, spec, storyboard, stor
 from test_story_slots import fixture, records
 
 
+@pytest.fixture(autouse=True)
+def synthetic_entailment_scores(monkeypatch):
+    from curiosity import entailment
+    def scores(pairs):
+        return {'accepted': True, 'pairs': [{'accepted': True, 'entailment_score': 1.0} for _ in pairs], 'synthetic': True}
+    monkeypatch.setattr(entailment, 'score_pairs', scores)
+
+
 @pytest.mark.parametrize('decision,accepted', [('missing', False), (False, False), ('true', False), (True, True)])
 def test_topic_acceptance_must_be_explicit_literal_true(monkeypatch, decision, accepted):
     def ask(*args, **kwargs):
-        result = {'supported': True, 'source_assessments': [
+        result = {'answer': 'Synthetic fixture observations remain fictional in this bounded unit test.',
+                  'answer_quote_ids': ['S0Q0', 'S1Q0'],
+                  'supported': True, 'source_assessments': [
             {'source_index': i, 'usable': True, 'reason': 'Synthetic source fixture'} for i in range(2)],
             'observable_quote_ids': ['S0Q0'], 'mechanism_quote_ids': ['S1Q0'], 'issues': []}
         if decision != 'missing':
@@ -105,6 +115,22 @@ def test_explicit_source_mode_checks_topic_before_script_inference(monkeypatch, 
         planner.draft('Synthetic fixture question?', target, source_urls=['https://example.org/one', 'https://example.org/two'])
     assert calls == [('Synthetic fixture question?', 2)] and not target.exists()
     assert json.loads(target.with_suffix('.source-acceptance.json').read_text())['accepted'] is False
+
+
+def test_independent_evidence_rejection_cannot_be_overridden_by_binary_review(monkeypatch, tmp_path):
+    from curiosity import entailment
+    raw = patch_valid_draft(monkeypatch)
+    def ask(model, system, prompt, schema, *args, **kwargs):
+        if 'slots' in schema['properties']: return deepcopy(raw), {'synthetic': True}
+        raise AssertionError('Binary review ran after independent evidence rejection')
+    monkeypatch.setattr(storyboard, 'ask', ask)
+    monkeypatch.setattr(entailment, 'story', lambda obj: {'accepted': False, 'pairs': [{'line': 2, 'accepted': False}]})
+    target = tmp_path / 'rejected.json'
+    with pytest.raises(ValueError, match='source/story checks'):
+        planner.draft('Synthetic fixture question?', target, source_records=records())
+    report = json.loads(target.with_suffix('.audit.json').read_text())
+    assert not target.exists() and report['accepted'] is False
+    assert all(item['independent_entailment']['accepted'] is False for item in report['attempts'])
 
 
 def test_final_specification_cannot_be_marked_accepted_before_validation(monkeypatch, tmp_path):
