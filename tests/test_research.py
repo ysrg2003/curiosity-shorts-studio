@@ -69,7 +69,7 @@ def test_backup_mechanism_query_is_used_when_reference_budget_remains(monkeypatc
     assert len(sources)==2 and searches==['synthetic mechanism','Synthetic question?']
 
 
-def test_both_query_pools_are_discovered_before_reference_budget_and_reads_are_interleaved(monkeypatch):
+def test_all_query_pools_precede_globally_ranked_reference_reads_with_per_page_caps(monkeypatch):
     monkeypatch.setattr(autonomy, 'public_url', lambda url: url)
     searches = []; reads = []
     def pages(query):
@@ -86,11 +86,11 @@ def test_both_query_pools_are_discovered_before_reference_budget_and_reads_are_i
     with pytest.raises(autonomy.ResearchUnavailable) as found:
         autonomy.research('Synthetic question?', 'synthetic mechanism')
     assert len(reads) == 10
-    assert reads[:4] == ['https://host10-0.edu/article', 'https://host20-0.edu/article',
-                         'https://host11-0.edu/article', 'https://host21-0.edu/article']
+    from collections import Counter
+    assert max(Counter(urlparse(url).hostname.rsplit('-',1)[0] for url in reads).values())<=6
     audit = found.value.diagnostics
     assert audit['all_query_discovery_precedes_reference_reads']
-    assert {r['discovery_query'] for r in audit['retrieval_attempts']} == set(searches)
+    assert all(r['discovery_query'] in searches for r in audit['retrieval_attempts'])
 
 
 def test_unavailable_mechanism_search_does_not_prevent_exact_question_discovery(monkeypatch):
@@ -247,7 +247,7 @@ def test_subject_query_is_model_supplied_and_precedes_mechanism_and_full_questio
     monkeypatch.setattr(autonomy,'article',lambda url:{'url':url,'title':'Synthetic fixture motion','text':'Synthetic fixture motion. '*40})
     sources,audit=autonomy.research('Why does a synthetic fixture move?','synthetic vector motion','synthetic fixture')
     assert searched==['synthetic fixture','synthetic vector motion','Why does a synthetic fixture move?']
-    assert sources[0]['title']=='synthetic fixture' and audit['subject_query_is_not_fact']
+    assert 'synthetic' in sources[0]['title'].lower() and audit['subject_query_is_not_fact']
 
 
 def test_later_more_relevant_document_is_not_suppressed_by_same_publisher(monkeypatch):
@@ -340,3 +340,43 @@ def test_europepmc_reads_are_serial_paced_and_cached(monkeypatch):
     second='https://www.ebi.ac.uk/europepmc/webservices/rest/article/MED/456?fixture=2'
     planner.source_bytes(first);planner.source_bytes(first);planner.source_bytes(second)
     assert len(calls)==2 and sleeps==[0.75]
+
+
+def test_discovery_page_and_citation_subject_filters_precede_reference_http(monkeypatch):
+    reads=[];citation_pages=[]
+    monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    def pages(query):return [
+        {'pageid':1,'title':'Synthetic fixture','extract':'Synthetic fixture moves in this fictional scenario. '*30,'fullurl':'https://en.wikipedia.org/wiki/Fixture'},
+        {'pageid':2,'title':'Fictional performer','extract':'An unrelated imaginary biography. '*30,'fullurl':'https://en.wikipedia.org/wiki/Performer'}]
+    monkeypatch.setattr(autonomy,'wiki_pages',pages)
+    def links(index):
+        citation_pages.append(index)
+        return [{'url':'https://first.edu/fixture','context':'Synthetic fixture movement in a fictional experiment.'},
+                {'url':'https://second.edu/biography','context':'Fictional performer biography.'}]
+    monkeypatch.setattr(autonomy,'wiki_links',links)
+    def article(url):reads.append(url);return {'url':url,'title':'Synthetic fixture movement','text':'Synthetic fixture motion. '*40}
+    monkeypatch.setattr(autonomy,'article',article)
+    sources,audit=autonomy.research('Why does a synthetic fixture move?','synthetic motion','synthetic fixture')
+    assert citation_pages==[1] and reads==['https://first.edu/fixture'] and len(sources)==2
+    assert any(row['status']=='subject_mismatch_skipped' for row in audit['discovery'])
+
+
+def test_reused_bm25_stemming_matches_inflections_and_ignores_question_filler():
+    from curiosity.autonomy import rank_texts,tokens,subject_overlap
+    assert tokens('clouds')==tokens('cloud') and tokens('why does the')==()
+    scores=rank_texts('synthetic moving fixture',['Fictional actor biography.','Synthetic fixtures move in an imaginary experiment.'])
+    assert scores[1]>scores[0] and subject_overlap('synthetic fixture','Synthetic fixtures move.')==1
+    assert rank_texts('fixture',['',''])==[0,0] and rank_texts('fixture',[])==[]
+
+
+def test_globally_ranked_citations_prefer_exact_subject_over_pool_turns(monkeypatch):
+    monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    monkeypatch.setattr(autonomy,'wiki_pages',lambda query:[page(1),page(2)])
+    def links(index):return [{'url':f'https://host{index}-{i}.edu/fixture','context':('synthetic fixture movement' if index==2 else 'synthetic general notes')} for i in range(8)]
+    monkeypatch.setattr(autonomy,'wiki_links',links)
+    reads=[]
+    def article(url):reads.append(url);raise OSError('Synthetic fixture unavailable')
+    monkeypatch.setattr(autonomy,'article',article)
+    with pytest.raises(autonomy.ResearchUnavailable):autonomy.research('Why does a synthetic fixture move?','synthetic motion','synthetic fixture')
+    assert len(reads)==10 and all('host2-' in url for url in reads[:6])
+    assert sum('host2-' in url for url in reads)==6
