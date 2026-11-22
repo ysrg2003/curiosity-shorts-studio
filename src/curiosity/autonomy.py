@@ -1,0 +1,107 @@
+"""No-input topic hypotheses and keyless research. Discovery is not truth certification."""
+import hashlib
+import re
+from urllib.parse import urlencode,urlparse
+from .planner import fetch,public_url
+from .storyboard import ask
+
+PUBLISHERS=('nasa.gov','noaa.gov','usgs.gov','nih.gov','nsf.gov','science.org','nature.com','scientificamerican.com','openstax.org','esa.int','metoffice.gov.uk','sciencefocus.com','britannica.com')
+
+
+def publisher(url):
+    host=(urlparse(url).hostname or '').lower()
+    parts=host.split('.')
+    return '.'.join(parts[-3:] if '.'.join(parts[-2:]) in {'co.uk','ac.uk','gov.uk','com.au','gov.au'} else parts[-2:])
+
+
+def eligible_reference(url):
+    p=urlparse(url);host=(p.hostname or '').lower()
+    return p.scheme=='https' and (host.endswith('.edu') or any(host==root or host.endswith('.'+root) for root in PUBLISHERS))
+
+
+def questions(model,previous,endpoint='http://127.0.0.1:11434',seed=43):
+    schema={'type':'object','properties':{'candidates':{'type':'array','minItems':3,'maxItems':3,'items':{'type':'object','properties':{'question':{'type':'string'},'search_terms':{'type':'string'}},'required':['question','search_terms']}}},'required':['candidates']}
+    data,stats=ask(model,'Propose exactly3distinct, visually explainable everyday science questions for a playful English educational cartoon. Choose from physics, chemistry, astronomy, weather or ordinary nonmedical biology. Do not propose medical advice, disease, politics, product claims or current events. These are unverified research hypotheses, not factual answers. Avoid the supplied previous topics. Each question is under110characters. search_terms names its precise scientific mechanism. Return JSON only. /no_think',{'previous_topics':previous[-100:]},schema,endpoint,seed)
+    result=[]
+    for item in data.get('candidates',[]):
+        q=str(item.get('question','')).strip();terms=str(item.get('search_terms','')).strip()
+        if 10<=len(q)<=110 and 3<=len(terms)<=150 and not duplicate(q,previous):result.append({'question':q,'search_terms':terms})
+    if not result:raise ValueError('No valid unseen topic hypotheses. No video created.')
+    return result,stats
+
+
+def duplicate(question,previous):
+    def words(text):return set(re.findall(r'[a-z]{4,}',text.lower()))-{'does','what','when','where','that','with','have','from','your'}
+    a=words(question)
+    return any(a==words(old) or len(a&words(old))/max(1,len(a|words(old)))>=0.7 for old in previous)
+
+
+class ResearchUnavailable(ValueError):
+    def __init__(self,message,diagnostics):
+        super().__init__(message);self.diagnostics=diagnostics
+
+
+def research(question,terms):
+    params=urlencode({'action':'query','generator':'search','gsrsearch':terms,'gsrlimit':2,'prop':'extracts|info|extlinks','explaintext':1,'exintro':1,'inprop':'url','ellimit':50,'format':'json'})
+    data=fetch('https://en.wikipedia.org/w/api.php?'+params)
+    pages=sorted(data.get('query',{}).get('pages',{}).values(),key=lambda p:p.get('index',999))
+    sources=[];groups=set();attempted=[]
+    for page in pages:
+        if len(page.get('extract',''))>=450 and 'wikipedia.org' not in groups:
+            sources.append({'url':public_url(page['fullurl']),'title':page.get('title',''),'text':page['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API'})
+            groups.add('wikipedia.org')
+        for item in page.get('extlinks',[]):
+            url=item.get('*',item.get('url',''))
+            # A documented HTTP reference may support HTTPS. Only fetch the verified HTTPS endpoint.
+            if url.startswith('http://'):url='https://'+url[7:]
+            if len(attempted)>=6:break
+            if not eligible_reference(url) or publisher(url) in groups:continue
+            record={'requested_url':url};attempted.append(record)
+            try:
+                source=article(url)
+                group=publisher(source['url'])
+                if not eligible_reference(source['url']) or group in groups:
+                    record['status']='ineligible_or_duplicate_resolved_publisher';continue
+                sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'])
+            except Exception as error:
+                record.update(status='unreadable',error_type=type(error).__name__);continue
+            if len(groups)>=2:return sources,{'question':question,'query':terms,'publishers':sorted(groups),'retrieval_attempts':attempted,'not_a_truth_guarantee':True}
+    raise ResearchUnavailable('No two readable publisher groups from live research. No unsupported fallback or video.',{'question':question,'query':terms,'publishers':sorted(groups),'retrieval_attempts':attempted})
+
+
+def article(url):
+    # Reuse the public-source safety checks, then the Apache-licensed Trafilatura extractor.
+    from urllib.request import Request,build_opener
+    from .planner import PublicRedirects,USER_AGENT
+    import trafilatura
+    public_url(url)
+    with build_opener(PublicRedirects()).open(Request(url,headers={'User-Agent':USER_AGENT}),timeout=25) as response:
+        final=public_url(response.url);raw=response.read(2_000_001)
+        if len(raw)>2_000_000:raise ValueError('Source exceeds2MB')
+    if raw.startswith(b'%PDF'):
+        from io import BytesIO
+        from pypdf import PdfReader
+        reader=PdfReader(BytesIO(raw))
+        if len(reader.pages)>40:raise ValueError('Source PDF exceeds40pages')
+        text='\n'.join(page.extract_text() or '' for page in reader.pages)
+        data={'text':text,'title':str((reader.metadata or {}).get('/Title') or '')}
+        method='pypdf'
+    else:
+        doc=trafilatura.bare_extraction(raw,url=final,include_comments=False,include_tables=False,with_metadata=True)
+        if not doc:raise ValueError('No readable article')
+        data=doc.as_dict() if hasattr(doc,'as_dict') else dict(doc)
+        method='trafilatura'
+    text=re.sub(r'\s+',' ',data.get('text') or '').strip()
+    if len(text)<700:raise ValueError('Article too short for source checks')
+    return {'url':final,'requested_url':url,'title':data.get('title') or '', 'text':text[:18000],
+            'publisher':publisher(final),'extraction_method':method,'text_sha256':hashlib.sha256(text.encode()).hexdigest()}
+
+
+def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43):
+    candidates,stats=questions(model,previous,endpoint,seed);audit=[]
+    for item in candidates:
+        try:
+            sources,report=research(item['question'],item['search_terms'])
+            return item['question'],sources,{'selection':stats,'candidates':candidates,'rejections':audit,'research':report,'operator_topic_or_source_input':False}
+        except (ValueError,OSError) as error:audit.append({'question':item['question'],'status':'research_unavailable','error_type':type(error).__name__,'details':getattr(error,'diagnostics',{})})
+    raise ResearchUnavailable('All automatic topic candidates lacked sufficient retrieved evidence. No video created.',{'selection':stats,'candidates':candidates,'rejections':audit})
