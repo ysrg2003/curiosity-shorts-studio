@@ -37,6 +37,9 @@ class LocalModel:
         if self.source:payload['prompt']+='\nThe input source URL is '+self.source+'. Cite only that source; do not invent additional sources.'
         request=Request('http://127.0.0.1:11434/api/generate',data=json.dumps(payload).encode(),headers={'Content-Type':'application/json'})
         with urlopen(request,timeout=1200) as response:result=json.load(response)
+        if result.get('thinking'):
+            from curiosity.remote_ai import ModelOutputInvalid
+            raise ModelOutputInvalid({'backend':'ollama','validation':'unexpected_thinking_output'})
         self.calls.append({'output_tokens':result.get('eval_count'),'prompt_tokens':result.get('prompt_eval_count'),'seconds':round(result.get('total_duration',0)/1e9,2)})
         return result['response']
     def complete(self,prompt,system=None):return self.generate(prompt,system)
