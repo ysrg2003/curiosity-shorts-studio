@@ -6,12 +6,13 @@ build-backend = "setuptools.build_meta"
 name = "curiosity-studio"
 version = "0.1.0"
 description = "Pip and Ray science Shorts, from episode JSON to reviewed video and YouTube upload"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 dependencies = ["Pillow==11.3.0", "edge-tts==7.3.1", "numpy==2.2.6", "soundfile==0.13.1", "google-api-python-client==2.179.0", "google-auth-oauthlib==1.2.2"]
 
 [project.optional-dependencies]
 test = ["pytest==8.4.1", "PyYAML==6.0.2"]
 local-voice = ["kokoro-onnx==0.6.1"]
+motion = ["manim==0.20.1"]
 
 [project.scripts]
 curiosity = "curiosity.cli:main"
