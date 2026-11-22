@@ -6,6 +6,39 @@ from html.parser import HTMLParser
 from .planner import fetch,public_url,source_bytes,source_error,SourceValidationError
 from .storyboard import ask
 
+from functools import lru_cache
+import re
+import unicodedata
+
+STOP = frozenset('a an and are as at be because been being by can could did do does for from had has have how i if in into is it its may might not of on or our should so than that the their them there these they this those to under up was we were what when where which while who why will with without would you your'.split())
+
+
+@lru_cache(maxsize=1)
+def stemmer():
+    import snowballstemmer
+    return snowballstemmer.stemmer('english')
+
+
+@lru_cache(maxsize=4096)
+def tokens(text):
+    words=re.findall(r'[a-z]{3,}',unicodedata.normalize('NFKC',text).casefold())
+    return tuple(stemmer().stemWords([word for word in words if word not in STOP]))
+
+
+def rank_texts(query,texts):
+    """BM25L avoids negative common-term weights in tiny candidate collections."""
+    from rank_bm25 import BM25L
+    rows=[list(tokens(text)) for text in texts]
+    if not rows or not any(rows):return [0.0]*len(rows)
+    scorer=BM25L(rows)
+    return [round(float(score),6) for score in scorer.get_scores(list(tokens(query)))]
+
+
+def subject_overlap(subject,text):
+    wanted=set(tokens(subject))
+    return len(wanted&set(tokens(text)))/max(1,len(wanted))
+
+
 PUBLISHERS=('nasa.gov','noaa.gov','usgs.gov','nih.gov','nsf.gov','science.org','nature.com','scientificamerican.com','openstax.org','esa.int','metoffice.gov.uk','sciencefocus.com','britannica.com')
 
 
@@ -127,9 +160,7 @@ def document_rank(source,question,subject):
 
 
 def research(question,terms,subject_query=""):
-    # Discover both query pools before any article read can consume the budget.
-    # Mechanism-first text anchors the encyclopedia excerpt; references are interleaved.
-    from itertools import zip_longest
+    # Discover every query before any article read. Search hypotheses are not facts.
     sources=[];groups=set();attempted=[];discovery=[];seen_pages=set();seen_urls=set()
     queries=list(dict.fromkeys(([subject_query] if subject_query else [])+[terms,question]));pools=[]
     def report():return {'question':question,'queries':queries,'publishers':sorted(groups),'discovery':discovery,'retrieval_attempts':attempted,'all_query_discovery_precedes_reference_reads':True,'not_a_truth_guarantee':True}
@@ -143,54 +174,76 @@ def research(question,terms,subject_query=""):
             pools.append([]);continue
         discovery.append({'query':query,'status':'retrieved','page_titles':[page.get('title','') for page in pages]})
         pools.append(pages)
-    for pages in pools:
-        intro=next((page for page in pages if len(page.get('extract',''))>=450),None)
-        if intro:
-            sources.append({'url':public_url(intro['fullurl']),'title':intro.get('title',''),'text':intro['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API','source_scope':'encyclopedia_introduction'})
-            groups.add('wikipedia.org');break
-    queues=[]
-    for row in zip_longest(*pools):
-        for query_index,page in enumerate(row):
-            if page is None:continue
+    pages=[]
+    for query_index,pool in enumerate(pools):
+        for page in pool:
             page_id=page.get('pageid')
             if page_id is None or page_id in seen_pages:continue
             seen_pages.add(page_id)
-            try:links=wiki_links(page_id)
-            except (ValueError,OSError) as error:
-                details=source_error(error)
-                discovery.append({'page_id':page_id,'status':'references_unavailable','error_type':type(error).__name__,'transport':details})
-                if details.get('provider')=='wikimedia' and details.get('provider_stop'):
-                    raise ResearchUnavailable('Discovery provider requested a stop. No further candidate requests or media.',{**report(),'provider_pause':details}) from None
-                continue
-            urls=rank_references(links,question,terms)
-            discovery.append({'page_id':page_id,'status':'references_ranked','citation_links':len(links),'eligible_unique_links':len(urls),'ranking_is_not_truth_verification':True})
-            queues.append({'page_id':page_id,'query':queries[query_index],'urls':urls,'attempts':0})
-    while len(attempted)<10 and any(item['urls'] and item['attempts']<6 for item in queues):
-        for queue in queues:
-            if len(attempted)>=10:break
-            if queue['attempts']>=6:continue
-            while queue['urls']:
-                url=queue['urls'].pop(0)
-                if url not in seen_urls:break
-            else:continue
-            seen_urls.add(url);queue['attempts']+=1
-            record={'requested_url':url,'discovery_page_id':queue['page_id'],'discovery_query':queue['query']};attempted.append(record)
-            try:
-                source=article(url);group=publisher(source['url'])
-                if not eligible_reference(source['url']):
-                    record['status']='ineligible_or_duplicate_resolved_publisher';continue
-                sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'],title=source.get('title',''),source_scope=source.get('source_scope','article_excerpt'),characters=len(source['text']))
-            except Exception as error:
-                record.update(status='unreadable',error_type=type(error).__name__,transport=source_error(error));continue
+            # A subject phrase is only a retrieval anchor, not scientific approval.
+            title=page.get('title','');intro=page.get('extract','')
+            keep=not subject_query or subject_overlap(subject_query,title)>=0.5 or subject_overlap(subject_query,intro)>=0.75
+            discovery.append({'page_id':page_id,'page_title':title,'status':'subject_retrieval_candidate' if keep else 'subject_mismatch_skipped',
+                              'retrieval_only':True,'query':queries[query_index]})
+            if keep:pages.append({**page,'query_index':query_index})
+    weights=rank_texts((subject_query or question)+' '+question,[page.get('title','')+' '+page.get('title','')+' '+page.get('extract','')[:4000] for page in pages])
+    pages=[page for _,page in sorted(zip(weights,pages),key=lambda row:-row[0])]
+    intro=next((page for page in pages if len(page.get('extract',''))>=450),None)
+    if intro:
+        sources.append({'url':public_url(intro['fullurl']),'title':intro.get('title',''),'text':intro['extract'],'publisher':'wikipedia.org','extraction_method':'MediaWiki introduction API','source_scope':'encyclopedia_introduction'})
+        groups.add('wikipedia.org')
+    queues=[];reference_candidates=[]
+    for page in pages:
+        page_id=page['pageid'];query_index=page['query_index']
+        try:links=wiki_links(page_id)
+        except (ValueError,OSError) as error:
+            details=source_error(error)
+            discovery.append({'page_id':page_id,'status':'references_unavailable','error_type':type(error).__name__,'transport':details})
+            if details.get('provider')=='wikimedia' and details.get('provider_stop'):
+                raise ResearchUnavailable('Discovery provider requested a stop. No further candidate requests or media.',{**report(),'provider_pause':details}) from None
+            continue
+        urls=rank_references(links,question,terms)
+        context={item.get('url',item.get('*','')).replace('http://','https://',1):item.get('context','') for item in links}
+        eligible=[]
+        for url in urls:
+            citation=context.get(url,'')
+            # Missing citation text can still be ranked from URL, but known unrelated
+            # citation context cannot consume an article request just for its hostname.
+            keep=not subject_query or subject_overlap(subject_query,citation+' '+urlparse(url).path)>0
+            if keep:eligible.append(url)
+        discovery.append({'page_id':page_id,'status':'references_ranked','citation_links':len(links),'eligible_unique_links':len(urls),
+                          'subject_matched_links':len(eligible),'ranking_is_not_truth_verification':True})
+        queue={'page_id':page_id,'query':queries[query_index],'urls':eligible,'attempts':0};queues.append(queue)
+        for url in eligible:reference_candidates.append({'url':url,'queue':queue,'text':context.get(url,'')+' '+urlparse(url).path})
+    ref_weights=rank_texts((subject_query or question)+' '+question,[item['text'] for item in reference_candidates])
+    reference_candidates=[item for _,item in sorted(zip(ref_weights,reference_candidates),key=lambda row:-row[0])]
+    # One globally ranked queue, while retaining each page's six-read cap and the
+    # overall ten-read cap. An irrelevant query pool no longer gets equal turns.
+    while len(attempted)<10:
+        candidate=next((item for item in reference_candidates if item['url'] not in seen_urls and item['queue']['attempts']<6),None)
+        if candidate is None:break
+        queue=candidate['queue'];url=candidate['url']
+        seen_urls.add(url);queue['attempts']+=1
+        record={'requested_url':url,'discovery_page_id':queue['page_id'],'discovery_query':queue['query']};attempted.append(record)
+        try:
+            source=article(url);group=publisher(source['url'])
+            if not eligible_reference(source['url']):
+                record['status']='ineligible_or_duplicate_resolved_publisher';continue
+            sources.append(source);groups.add(group);record.update(status='retrieved',resolved_url=source['url'],title=source.get('title',''),source_scope=source.get('source_scope','article_excerpt'),characters=len(source['text']))
+        except Exception as error:
+            record.update(status='unreadable',error_type=type(error).__name__,transport=source_error(error));continue
     # Read the same bounded queue before choosing one candidate per publisher.
     # The first readable but unrelated paper must not suppress its better references.
     encyclopedias=[source for source in sources if publisher(source['url'])=='wikipedia.org']
     articles=[source for source in sources if publisher(source['url'])!='wikipedia.org']
-    ranked=sorted(articles,key=lambda source:-document_rank(source,question,subject_query))
+    article_weights=rank_texts((subject_query or question)+' '+question,[source.get('title','')+' '+source.get('title','')+' '+source['text'][:6000] for source in articles])
+    weighted=sorted(zip(article_weights,articles),key=lambda row:-row[0])
+    ranked=[source for _,source in weighted]
+    weight_by_url={source['url']:weight for weight,source in weighted}
     selected=encyclopedias[:1];selected_groups={publisher(source['url']) for source in selected}
     candidates=[{'url':source['url'],'title':source.get('title',''),'publisher':publisher(source['url']),
                  'source_scope':source.get('source_scope','article_excerpt'),
-                 'retrieval_rank':document_rank(source,question,subject_query)} for source in ranked]
+                 'retrieval_rank':weight_by_url[source['url']]} for source in ranked]
     for source in ranked:
         group=publisher(source['url'])
         if group in selected_groups:continue
