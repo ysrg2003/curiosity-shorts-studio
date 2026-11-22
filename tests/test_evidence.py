@@ -165,3 +165,17 @@ def test_entailed_answer_still_requires_full_passage_scope_audit(monkeypatch,qua
     monkeypatch.setattr(storyboard,'ask',ask)
     accepted,audit=evidence.screen('Synthetic observation?',sources(),'synthetic')
     assert accepted is qualification and audit['independent_entailment']['qualification_audit']['accepted'] is qualification
+
+
+def test_scope_retry_reuses_only_original_sources_not_generated_answer(monkeypatch):
+    calls=[]
+    def once(question,records,*args):
+        calls.append(deepcopy(records))
+        if len(calls)==1:return False,{'independent_entailment':{'qualification_audit':{'complete_answer':False,'qualifiers_preserved':False,'no_exclusive_or_universal_overclaim':False}},'verdict':{'answer':'Untrusted unsupported fictional prose.'}}
+        return True,{'accepted':True}
+    monkeypatch.setattr(evidence,'screen_once',once)
+    original=sources();accepted,audit=evidence.screen('Synthetic?',original,'synthetic')
+    assert accepted and len(calls)==2 and calls[0]==original
+    assert all('scope_audit_feedback' in source for source in calls[1])
+    assert all(source['text']==original[i]['text'] and 'answer' not in source for i,source in enumerate(calls[1]))
+    assert audit['fresh_scope_assessments']==2 and 'scope_audit_feedback' not in original[0]
