@@ -45,8 +45,22 @@ def request(prompt,system,schema=None,json_mode=False):
         result=OpenAICompatibleAdapter('openrouter','https://openrouter.ai/api/v1').complete_json(
             model=MODEL,secret=key,system_prompt=system,user_prompt=prompt,
             timeout_seconds=180,supports_response_format=bool(schema or json_mode),invocation_profile=profile)
-    except Exception:
-        raise RuntimeError('Free model request failed. No paid model, paid tool or alternate key was attempted.') from None
+    except Exception as error:
+        status=getattr(error,'status_code',None)
+        status=status if isinstance(status,int) and 100<=status<=599 else 'unavailable'
+        category=getattr(error,'error_class','unavailable')
+        allowed={'auth','authentication','rate_limit','quota','transient','invalid_or_unknown','invalid_request','permission','unavailable','plan_or_credit'}
+        category=category if category in allowed else 'unavailable'
+        reason='not_classified'
+        try:
+            body=json.loads(str(error));message=str(body.get('error',{}).get('message','')).lower()
+            if 'data policy' in message or 'privacy setting' in message:reason='provider_data_policy_block'
+            elif 'response_format' in message or 'json_schema' in message:reason='response_format_rejected'
+            elif 'no endpoints' in message:reason='no_matching_free_endpoint'
+            elif status==401:reason='authentication_rejected'
+            elif status==429:reason='rate_or_quota_limit'
+        except (ValueError,TypeError,AttributeError):pass
+        raise RuntimeError(f'Free model request failed: HTTP={status}, category={category}, reason={reason}. No paid model, paid tool or alternate key was attempted.') from None
     cost=result.usage.get('cost')
     if cost is not None and Decimal(str(cost))!=0:raise RuntimeError('Unexpected nonzero model cost. Stop all further model calls and inspect account activity.')
     output=result.payload if schema or json_mode else result.payload['text']
