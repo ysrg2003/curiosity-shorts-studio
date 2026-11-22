@@ -146,6 +146,7 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
     from .remote_ai import ModelOutputInvalid
     candidates,stats=questions(model,previous,endpoint,seed);audit=[]
     for item in candidates:
+        report=None
         try:
             sources,report=research(item['question'],item['search_terms'])
             from .evidence import screen
@@ -155,5 +156,11 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
             if not relevant:raise ResearchUnavailable('Readable sources did not directly support the exact question and mechanism.',{'research':report})
             approved=[sources[index] for index in relevance['approved_source_indices']]
             return item['question'],approved,{'selection':stats,'candidates':candidates,'rejections':audit,'research':report,'operator_topic_or_source_input':False}
-        except (ValueError,OSError) as error:audit.append({'question':item['question'],'status':'research_unavailable','error_type':type(error).__name__,'details':error.metadata if isinstance(error,ModelOutputInvalid) else getattr(error,'diagnostics',{})})
-    raise ResearchUnavailable('All automatic topic candidates lacked sufficient retrieved evidence. No video created.',{'selection':stats,'candidates':candidates,'rejections':audit})
+        except (ValueError,OSError) as error:
+            details=error.metadata if isinstance(error,ModelOutputInvalid) else getattr(error,'diagnostics',{})
+            if isinstance(error,ModelOutputInvalid):
+                status='source_assessment_contract_invalid'
+                details={'model_contract':details,'research':report}
+            else:status='research_unavailable'
+            audit.append({'question':item['question'],'status':status,'error_type':type(error).__name__,'details':details})
+    raise ResearchUnavailable('No automatic candidate completed topic/source acceptance. Inspect failure stages; a contract failure is not a scientific evidence rejection. No video created.',{'selection':stats,'candidates':candidates,'rejections':audit})
