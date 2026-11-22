@@ -75,8 +75,8 @@ def document_resolution(requested,final,is_pdf):
 
 def research(question,terms):
     sources=[];groups=set();attempted=[];discovery=[];seen_pages=set();seen_urls=set()
-    def report():return {'question':question,'queries':list(dict.fromkeys([terms,question])),'publishers':sorted(groups),'discovery':discovery,'retrieval_attempts':attempted,'not_a_truth_guarantee':True}
-    for query in dict.fromkeys([terms,question]):
+    def report():return {'question':question,'queries':list(dict.fromkeys([question,terms])),'publishers':sorted(groups),'discovery':discovery,'retrieval_attempts':attempted,'not_a_truth_guarantee':True}
+    for query in dict.fromkeys([question,terms]):
         if len(attempted)>=10:break
         try:pages=wiki_pages(query)
         except (ValueError,OSError) as error:
