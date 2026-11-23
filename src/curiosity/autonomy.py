@@ -385,7 +385,12 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
     for item in candidates:
         report=None
         try:
-            sources,report=research(item['question'],item['search_terms'],item.get('subject_query',''))
+            import os
+            if os.environ.get('CURIOSITY_DISCOVERY')=='prepared-router-leads':
+                from .router_research import discover
+                sources,report=discover(item['question'],item['search_terms'],item.get('subject_query',''),model,endpoint)
+            else:
+                sources,report=research(item['question'],item['search_terms'],item.get('subject_query',''))
             from .evidence import screen,plan_sources
             from .storyboard import source_pack
             packed=source_pack(item['question'],sources,semantic=True)
