@@ -166,3 +166,7 @@ Scope explanations are diagnostics, not video narration: each allows up to1600ch
 ### Sentence-level answer evidence and checked critic basis
 
 The source writer maps each original answer sentence to its own source sentence IDs. The ordered sentence texts must reproduce the answer exactly; their citation union must match the declared evidence. Each sentence then passes the unchanged0.90independent entailment threshold against only its own declared evidence, with no truncation. A scope critic must separately state a source-grounded factual basis for each concern; that basis receives the same independent entailment check before any concern can guide fresh generation. An unsupported critic does not authorize acceptance: the candidate remains failed and does not get a blind retry. No prior answer or critic text is inserted into narration.
+
+### Single-authored answer units
+
+The model authors at most three original answer sentence units, not a second duplicated answer. The application joins them with single spaces and derives citation IDs mechanically. It never trims, pads or rewrites them; the existing500character answer cap still rejects excess output. Fresh assessment receives only independently entailed source propositions and original IDs, not the critic's unchecked explanation prose. Relevance of those propositions must still be reassessed. Original criticism remains in diagnostics, and its prior report survives a retry contract failure. No rejection is a scientific approval.
