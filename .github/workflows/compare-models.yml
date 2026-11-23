@@ -62,15 +62,15 @@ jobs:
               {'name':'two-path-complete','question':'How does the glim become bright in dry and wet modes?','ids':['A0','A1','B0','B1','C0'],'sufficient':True,'groups':[['A0'],['A1'],['B0']]},
               {'name':'missing-wet-mechanism','question':'How does the glim become bright in dry and wet modes?','ids':['A0','A1','B1','C0'],'sufficient':False,'groups':[]},
               {'name':'unrelated-only','question':'How does the glim become bright in dry and wet modes?','ids':['C0'],'sufficient':False,'groups':[]},
-              {'name':'optional-not-required','question':'Is a vep required for dry operation, and why?','ids':['A1','B2','C0'],'sufficient':True,'groups':[['B2']]},
+              {'name':'optional-not-required','question':'Is a vep required for dry operation?','ids':['A1','B2','C0'],'sufficient':True,'groups':[['B2']]},
           ]
           schema={'type':'object','properties':{
-              'sufficient':{'type':'boolean'},
+              'reason':{'type':'string','maxLength':320},
+              'missing_information':{'type':'string','maxLength':240},
               'selected_quote_ids':{'type':'array','items':{'type':'string'}},
               'unrelated_quote_ids':{'type':'array','items':{'type':'string'}},
-              'missing_information':{'type':'string'},
-              'reason':{'type':'string'},
-          },'required':['sufficient','selected_quote_ids','unrelated_quote_ids','missing_information','reason'],'additionalProperties':False}
+              'sufficient':{'type':'boolean'},
+          },'required':['reason','missing_information','selected_quote_ids','unrelated_quote_ids','sufficient'],'additionalProperties':False}
           report={'synthetic_only':True,'production_model_unchanged':True,'scientific_validation':False,'models':[]}
           output=Path('comparison/results.json')
           def save(): output.write_text(json.dumps(report,indent=2))
@@ -91,11 +91,13 @@ jobs:
                       prompt=('Use only these fictional quotes. Decide whether they fully answer the exact question, including every named mode. '
                           'Select only necessary supporting quote IDs. Label unrelated IDs separately. Missing a requested mechanism means insufficient. '
                           'Optional helpers are not requirements. Explain missing information and the decision briefly, do not invent facts. '
+                          'First reason briefly from the quotes, then name missing information, then select IDs and decide sufficiency last. '
+                          'Unrelated means outside the question, not merely incomplete on its own. A useful partial mechanism is not unrelated. '
                           'Return the JSON schema fields only.\n'+json.dumps(fixture))
                       started=time.monotonic();row={'name':case['name']};record['cases'].append(row);save()
                       try:
                           response=api('generate',{'model':model,'prompt':prompt,'format':schema,'stream':False,'think':False,'keep_alive':'5m',
-                              'options':{'num_ctx':4096,'num_predict':500,'num_thread':4,'temperature':0.35,'seed':79}})
+                              'options':{'num_ctx':4096,'num_predict':700,'num_thread':4,'temperature':0.35,'seed':79}})
                           row.update(seconds=round(time.monotonic()-started,2),output_tokens=response.get('eval_count'),done_reason=response.get('done_reason'),thinking_characters=len(response.get('thinking','')))
                           row['answer']=json.loads(response['response'])
                           answer=row['answer'];selected=set(answer['selected_quote_ids'])
@@ -103,7 +105,7 @@ jobs:
                               type(answer['sufficient']) is bool and answer['sufficient']==case['sufficient'] and
                               selected<=set(case['ids']) and 'C0' not in selected and
                               all(selected.intersection(group) for group in case['groups']) and
-                              set(answer['unrelated_quote_ids'])<=set(case['ids']) and
+                              set(answer['unrelated_quote_ids'])=={'C0'} and
                               (not case['sufficient'] or not answer['missing_information'].strip()))
                       except Exception as exc:
                           row.update(error=type(exc).__name__+': '+str(exc),seconds=round(time.monotonic()-started,2),passed=False)
