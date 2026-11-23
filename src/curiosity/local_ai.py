@@ -4,6 +4,8 @@ from urllib.request import Request,urlopen
 
 MODEL='qwen3:4b-instruct'
 MANIFEST='0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0'
+EXPERIMENTAL_MODEL='qwen3.5:9b'
+EXPERIMENTAL_MANIFEST='56671c2ab9385f9cfcb404638e32cd62d88e3501d44822208363c010179a3c90'
 
 
 def read_metadata():
@@ -63,7 +65,9 @@ if __name__=='__main__':
     from pathlib import Path
     import sys
     root=Path(__file__).resolve().parents[2]
-    if json.loads((root/'studio.json').read_text())['draft_model']!=MODEL:raise ValueError('Configured local model differs from the pinned workflow model')
+    if '--experimental-nine' in sys.argv:
+        MODEL,MANIFEST=EXPERIMENTAL_MODEL,EXPERIMENTAL_MANIFEST
+    elif json.loads((root/'studio.json').read_text())['draft_model']!=MODEL:raise ValueError('Configured local model differs from the pinned workflow model')
     if '--probe-only' in sys.argv:
         result=probe();print(json.dumps(result));sys.exit(0 if result['accepted'] else 1)
     print(json.dumps(inspect() if '--inspect-only' in sys.argv else verify()))
