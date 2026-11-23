@@ -181,6 +181,9 @@ def ask(model,system,prompt,schema,endpoint='http://127.0.0.1:11434',seed=43,eff
     if contract:
         prompt = {'request': prompt, 'prose_output_contract': contract}
         system += '\nThe prose_output_contract contains the original acceptance limits, including character counts and patterns. Structure is enforced separately. Satisfy all limits naturally; they remain mandatory client checks. Never merge words or cut a sentence to satisfy a limit.'
+    if os.environ.get('CURIOSITY_LLM_BACKEND')=='prepared-router':
+        from .router_ai import request
+        return request(system,prompt,schema,effort)
     if os.environ.get('CURIOSITY_LLM_BACKEND')=='openrouter-free':
         from .remote_ai import request
         obj,stats=request(json.dumps(prompt,ensure_ascii=False),system,schema=inference_schema(schema),effort=effort)
