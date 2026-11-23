@@ -14,6 +14,7 @@ def test_generated_urls_without_actual_search_metadata_are_not_grounding(monkeyp
     Policy=make_dataclass('Policy',[('max_attempts',int)])
     calls=[]
     class Router:
+        _curiosity_failures=[]
         config=SimpleNamespace(policy=Policy(64),keys_for=lambda provider:['not-a-real-secret'])
         def complete_auto(self,**kwargs):
             calls.append(kwargs)
