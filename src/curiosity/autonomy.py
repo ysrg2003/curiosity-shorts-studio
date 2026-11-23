@@ -405,7 +405,8 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
             from .spec import ROOT,write_json
             dossier=ROOT/'drafts'/('research-'+str(len(audit)+1)+'.json')
             dossier.parent.mkdir(parents=True,exist_ok=True)
-            write_json(dossier,{'schema_version':1,'question':item['question'],'source_records':sources,'packed_original_sources':packed,'research':report,'operator_topic_or_source_input':False,'source_acceptance_completed':False})
+            from .provenance import bind as bind_provenance
+            write_json(dossier,{'provenance':bind_provenance(ROOT,item['question'],packed),'schema_version':1,'question':item['question'],'source_records':sources,'packed_original_sources':packed,'research':report,'operator_topic_or_source_input':False,'source_acceptance_completed':False})
             plan_ok,source_plan=plan_sources(item['question'],packed,model,endpoint)
             report['source_scope_plan']=source_plan
             report['packed_original_sources']=packed
