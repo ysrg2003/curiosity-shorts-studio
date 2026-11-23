@@ -171,7 +171,7 @@ def test_scope_retry_reuses_only_original_sources_not_generated_answer(monkeypat
     calls=[]
     def once(question,records,*args):
         calls.append(deepcopy(records))
-        if len(calls)==1:return False,{'independent_entailment':{'qualification_audit':{'complete_answer':False,'qualifiers_preserved':False,'no_exclusive_or_universal_overclaim':False,'grounding':{'accepted':True},'findings':[{'problem':'missing_condition','explanation':'Synthetic condition applies only to this fixture.','quote_ids':['S0Q0']}]}},'verdict':{'answer':'Untrusted unsupported fictional prose.'}}
+        if len(calls)==1:return False,{'independent_entailment':{'qualification_audit':{'complete_answer':False,'qualifiers_preserved':False,'no_exclusive_or_universal_overclaim':False,'grounding':{'accepted':True},'findings':[{'problem':'missing_condition','explanation':'Synthetic condition applies only to this fixture.','source_claim':'Synthetic source proposition only.','quote_ids':['S0Q0']}]}},'verdict':{'answer':'Untrusted unsupported fictional prose.'}}
         return True,{'accepted':True}
     monkeypatch.setattr(evidence,'screen_once',once)
     original=sources();accepted,audit=evidence.screen('Synthetic?',original,'synthetic')
@@ -233,3 +233,25 @@ def test_scope_diagnostic_length_does_not_relax_source_or_decision_requirements(
     assert evidence.validate_scope_findings(audit,entries)['accepted']
     audit['findings'][0]['quote_ids']=['fabricated']
     assert not evidence.validate_scope_findings(audit,entries)['accepted']
+
+
+def test_answer_serialization_preserves_original_sentence_bytes_and_derived_ids():
+    original={'answer_claims':[{'sentence':'Synthetic gears move only in this fictional fixture.','quote_ids':['A','B']},{'sentence':'The fictional flag may rise under the stated condition.','quote_ids':['B','C']}]}
+    saved=deepcopy(original);out=evidence.serialize_answer(original)
+    assert original==saved and out['answer']==' '.join(item['sentence'] for item in original['answer_claims'])
+    assert out['answer_quote_ids']==['A','B','C']
+    assert evidence.serialize_answer({'answer_claims':[]})['answer']==''
+
+
+def test_retry_receives_verified_propositions_not_unchecked_explanatory_prose(monkeypatch):
+    calls=[]
+    finding={'problem':'missing_condition','explanation':'UNVERIFIED explanatory inference must not guide generation.','source_claim':'The synthetic fixture may use another fictional input.','quote_ids':['S0Q0']}
+    def once(question,records,*args):
+        calls.append(deepcopy(records))
+        if len(calls)==1:return False,{'independent_entailment':{'qualification_audit':{'complete_answer':False,'qualifiers_preserved':True,'no_exclusive_or_universal_overclaim':True,'grounding':{'accepted':True},'findings':[finding]}}}
+        return False,{'accepted':False}
+    monkeypatch.setattr(evidence,'screen_once',once)
+    evidence.screen('Synthetic?',sources(),'synthetic')
+    feedback=calls[1][0]['scope_audit_feedback']
+    assert feedback['verified_source_propositions']==[{'source_claim':finding['source_claim'],'quote_ids':['S0Q0']}]
+    assert 'UNVERIFIED' not in json.dumps(feedback)
