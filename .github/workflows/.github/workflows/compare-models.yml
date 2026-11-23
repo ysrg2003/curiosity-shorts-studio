@@ -1,0 +1,124 @@
+name: Compare free local evidence planning on fictional fixtures
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: fictional-model-comparison
+  cancel-in-progress: false
+jobs:
+  compare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Start pinned free local runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y zstd
+          curl --fail --location --retry 2 https://github.com/ollama/ollama/releases/download/v0.40.17/ollama-linux-amd64.tar.zst -o /tmp/ollama.tar.zst
+          mkdir -p /tmp/ollama
+          tar --zstd -xf /tmp/ollama.tar.zst -C /tmp/ollama
+          /tmp/ollama/bin/ollama serve > /tmp/ollama.log 2>&1 &
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags; then break; fi
+            sleep 1
+          done
+      - name: Compare bounded fictional evidence tasks without episode inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p comparison
+          cat > /tmp/compare.py <<'PY'
+          import json, subprocess, time, urllib.request, traceback
+          from pathlib import Path
+          models = [
+              ('qwen3:4b-instruct', '0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0'),
+              ('qwen3.5:4b', 'd8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04'),
+          ]
+          def api(path, payload=None, timeout=420):
+              body=None if payload is None else json.dumps(payload).encode()
+              req=urllib.request.Request('http://127.0.0.1:11434/api/'+path, data=body, headers={'Content-Type':'application/json'})
+              with urllib.request.urlopen(req, timeout=timeout) as response:
+                  return json.load(response)
+          # Entirely fictional machinery. These fixtures are never production topics,
+          # retrieved sources, script material, or evidence of real-world accuracy.
+          evidence = [
+              {'id':'A0','source':'manual','text':'A glim becomes bright after a flen enters its chamber.'},
+              {'id':'A1','source':'manual','text':'In dry mode the chamber makes flen by pressing a tor until it splits.'},
+              {'id':'B0','source':'field-notes','text':'In wet mode a sov dissolves and releases flen into the chamber; no tor is needed.'},
+              {'id':'B1','source':'field-notes','text':'Both dry and wet modes can make the glim bright.'},
+              {'id':'B2','source':'field-notes','text':'A vep can speed up dry operation, but dry operation also works without it.'},
+              {'id':'C0','source':'unrelated-catalog','text':'A glim-colored scarf is sold in blue and yellow.'},
+          ]
+          cases = [
+              {'name':'two-path-complete','question':'How does the glim become bright in dry and wet modes?','ids':['A0','A1','B0','B1','C0'],'sufficient':True,'groups':[['A0'],['A1'],['B0']]},
+              {'name':'missing-wet-mechanism','question':'How does the glim become bright in dry and wet modes?','ids':['A0','A1','B1','C0'],'sufficient':False,'groups':[]},
+              {'name':'unrelated-only','question':'How does the glim become bright in dry and wet modes?','ids':['C0'],'sufficient':False,'groups':[]},
+              {'name':'optional-not-required','question':'Is a vep required for dry operation, and why?','ids':['A1','B2','C0'],'sufficient':True,'groups':[['B2']]},
+          ]
+          schema={'type':'object','properties':{
+              'sufficient':{'type':'boolean'},
+              'selected_quote_ids':{'type':'array','items':{'type':'string'}},
+              'unrelated_quote_ids':{'type':'array','items':{'type':'string'}},
+              'missing_information':{'type':'string'},
+              'reason':{'type':'string'},
+          },'required':['sufficient','selected_quote_ids','unrelated_quote_ids','missing_information','reason'],'additionalProperties':False}
+          report={'synthetic_only':True,'production_model_unchanged':True,'scientific_validation':False,'models':[]}
+          output=Path('comparison/results.json')
+          def save(): output.write_text(json.dumps(report,indent=2))
+          save()
+          for model,digest in models:
+              record={'model':model,'expected_manifest':digest,'cases':[]};report['models'].append(record);save()
+              try:
+                  subprocess.run(['/tmp/ollama/bin/ollama','pull',model],check=True,timeout=480)
+                  installed=next(x for x in api('tags')['models'] if x['name']==model)
+                  if installed['digest']!=digest: raise ValueError('Manifest changed; refusing comparison')
+                  record['manifest_verified']=True
+                  record['server_version']=api('version').get('version')
+                  shown=api('show',{'model':model})
+                  record['capabilities']=shown.get('capabilities')
+                  for case in cases:
+                      fixture={k:case[k] for k in ('name','question')}
+                      fixture['quotes']=[q for q in evidence if q['id'] in case['ids']]
+                      prompt=('Use only these fictional quotes. Decide whether they fully answer the exact question, including every named mode. '
+                          'Select only necessary supporting quote IDs. Label unrelated IDs separately. Missing a requested mechanism means insufficient. '
+                          'Optional helpers are not requirements. Explain missing information and the decision briefly, do not invent facts. '
+                          'Return the JSON schema fields only.\n'+json.dumps(fixture))
+                      started=time.monotonic();row={'name':case['name']};record['cases'].append(row);save()
+                      try:
+                          response=api('generate',{'model':model,'prompt':prompt,'format':schema,'stream':False,'think':False,'keep_alive':'5m',
+                              'options':{'num_ctx':4096,'num_predict':500,'num_thread':4,'temperature':0.35,'seed':79}})
+                          row.update(seconds=round(time.monotonic()-started,2),output_tokens=response.get('eval_count'),done_reason=response.get('done_reason'),thinking_characters=len(response.get('thinking','')))
+                          row['answer']=json.loads(response['response'])
+                          answer=row['answer'];selected=set(answer['selected_quote_ids'])
+                          row['passed']=(response.get('done_reason')=='stop' and not response.get('thinking') and
+                              type(answer['sufficient']) is bool and answer['sufficient']==case['sufficient'] and
+                              selected<=set(case['ids']) and 'C0' not in selected and
+                              all(selected.intersection(group) for group in case['groups']) and
+                              set(answer['unrelated_quote_ids'])<=set(case['ids']) and
+                              (not case['sufficient'] or not answer['missing_information'].strip()))
+                      except Exception as exc:
+                          row.update(error=type(exc).__name__+': '+str(exc),seconds=round(time.monotonic()-started,2),passed=False)
+                      save()
+                  api('generate',{'model':model,'keep_alive':0})
+              except Exception as exc:
+                  record['error']=type(exc).__name__+': '+str(exc);save()
+          print(json.dumps(report,indent=2))
+          PY
+          python /tmp/compare.py
+      - name: Preserve fictional comparison results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fictional-model-comparison
+          path: comparison/results.json
+          retention-days: 1
+          if-no-files-found: warn
