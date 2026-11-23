@@ -63,6 +63,7 @@ def test_relevance_requires_true_boolean_and_observation_mechanism_two_sources(m
 def test_relevance_rejection_moves_only_to_remaining_model_proposed_candidates(monkeypatch):
     from curiosity import autonomy
     candidates=[{'question':f'Why does synthetic fixture {i} move?','search_terms':'synthetic movement'} for i in range(3)]
+    monkeypatch.setattr(evidence,'plan_sources',lambda *args:(True,{'selected_original_paths':[],'synthetic':True}))
     monkeypatch.setattr(autonomy,'questions',lambda *a,**k:(candidates,{}))
     calls=[]
     monkeypatch.setattr(autonomy,'research',lambda *a:(sources(),{'not_a_truth_guarantee':True}))
@@ -144,6 +145,7 @@ def test_relevance_rejects_inconsistent_source_assessments_and_selected_evidence
 def test_valid_source_subset_excludes_unusable_pool_records_before_drafting(monkeypatch):
     from curiosity import autonomy
     pool=sources()+[{'url':'https://example.net/history','text':'A synthetic historical account describes an obsolete fictional theory without asserting current facts.'}]
+    monkeypatch.setattr(evidence,'plan_sources',lambda *args:(True,{'selected_original_paths':[],'synthetic':True}))
     monkeypatch.setattr(autonomy,'questions',lambda *args:([{'question':'Synthetic observation?','search_terms':'synthetic mechanism'}],{}))
     monkeypatch.setattr(autonomy,'research',lambda *args:(pool,{}))
     def ask(model,system,prompt,schema,*args,**kwargs):
@@ -255,3 +257,53 @@ def test_retry_receives_verified_propositions_not_unchecked_explanatory_prose(mo
     feedback=calls[1][0]['scope_audit_feedback']
     assert feedback['verified_source_propositions']==[{'source_claim':finding['source_claim'],'quote_ids':['S0Q0']}]
     assert 'UNVERIFIED' not in json.dumps(feedback)
+
+
+def test_extractive_plan_keeps_distinct_generic_paths_before_any_answer(monkeypatch):
+    records=[{'url':'https://example.edu/a','text':'A fictional gate opens when the blue lever moves in this synthetic fixture. A different fictional gate opens when the red switch closes in this synthetic fixture.'},{'url':'https://example.org/b','text':'The synthetic blue lever pathway applies only while the test power is on. The synthetic red switch pathway applies only while the backup power is on.'}]
+    calls=[]
+    def ask(model,system,prompt,shape,*args,**kwargs):
+        calls.append(prompt)
+        assert 'answer_claims' not in shape['properties'] and 'answer' not in shape['properties']
+        entries=prompt['sentence_catalog'];blue=next(k for k,v in entries.items() if 'blue lever' in v['quote'] and v['source_index']==0);red=next(k for k,v in entries.items() if 'red switch' in v['quote'] and v['source_index']==0);condition=next(k for k,v in entries.items() if v['source_index']==1)
+        return {'scope_paths':[{'role':'observation','quote_ids':[blue]},{'role':'mechanism','quote_ids':[blue]},{'role':'alternative','quote_ids':[red]},{'role':'condition','quote_ids':[condition]}],'sufficient_for_exact_question':True},{}
+    monkeypatch.setattr(storyboard,'ask',ask)
+    accepted,plan=evidence.plan_sources('Why does the fictional gate open?',records,'synthetic')
+    assert accepted and len(calls)==1 and plan['source_records_referenced']==2
+    assert {'mechanism','alternative','condition'}.issubset({item['role'] for item in plan['selected_original_paths']})
+    for item in plan['selected_original_paths']:
+        for q in item['evidence']:assert q['quote'] in records[q['source_index']]['text']
+
+
+@pytest.mark.parametrize('paths',[[],[{'role':'observation','quote_ids':['S0Q0']},{'role':'mechanism','quote_ids':['S0Q0']}],[{'role':'mechanism','quote_ids':['invented']} ]])
+def test_extractive_plan_rejects_empty_single_source_or_invented_coverage(monkeypatch,paths):
+    monkeypatch.setattr(storyboard,'ask',lambda *args,**kwargs:({'scope_paths':paths,'sufficient_for_exact_question':True},{}))
+    assert not evidence.plan_sources('Synthetic?',sources(),'synthetic')[0]
+
+
+def test_source_plan_failure_never_calls_answer_writer(monkeypatch):
+    from curiosity import autonomy
+    monkeypatch.setattr(autonomy,'questions',lambda *args:([{'question':'Synthetic?','search_terms':'synthetic'}],{}))
+    monkeypatch.setattr(autonomy,'research',lambda *args:(sources(),{}))
+    monkeypatch.setattr(evidence,'plan_sources',lambda *args:(False,{'selected_original_paths':[],'accepted':False}))
+    def forbidden(*args):raise AssertionError('Answer writer ran before accepted source plan')
+    monkeypatch.setattr(evidence,'screen',forbidden)
+    with pytest.raises(autonomy.ResearchUnavailable):autonomy.select_and_research('synthetic',[])
+
+
+def test_source_scope_plan_executes_before_answer_and_preserves_original_paths(monkeypatch):
+    from curiosity import autonomy
+    events=[];original=sources();saved=deepcopy(original)
+    paths=[{'role':'mechanism','evidence':[{'quote_id':'S0Q0','quote':original[0]['text'],'source_index':0}]},{'role':'alternative','evidence':[{'quote_id':'S1Q0','quote':original[1]['text'],'source_index':1}]}]
+    monkeypatch.setattr(autonomy,'questions',lambda *args:([{'question':'Synthetic?','search_terms':'synthetic'}],{}))
+    monkeypatch.setattr(autonomy,'research',lambda *args:(original,{}))
+    def plan(*args):events.append('plan');return True,{'selected_original_paths':deepcopy(paths),'accepted':True}
+    def screen(question,records,*args):
+        events.append('answer')
+        assert events==['plan','answer']
+        assert records[0]['source_scope_plan']==paths
+        assert all('source_scope_plan' not in record for record in records[1:])
+        return True,{'approved_source_indices':[0,1],'accepted':True}
+    monkeypatch.setattr(evidence,'plan_sources',plan);monkeypatch.setattr(evidence,'screen',screen)
+    autonomy.select_and_research('synthetic',[])
+    assert original==saved and events==['plan','answer']
