@@ -25,3 +25,20 @@ def test_prepared_backend_uses_existing_router_entry_and_preserves_schema(monkey
 def test_request_budget_blocks_before_any_key_or_network_access(monkeypatch):
     monkeypatch.setattr(router_ai,'_REQUESTS',router_ai.MAX_REQUESTS)
     with pytest.raises(ValueError,match='budget'):router_ai.request('fictional',{}, {})
+
+
+def test_generated_motion_uses_prepared_router_not_local_model(monkeypatch):
+    import importlib.util
+    from pathlib import Path
+    hook=importlib.util.spec_from_file_location('router_motion_probe',Path(__file__).parents[1]/'experiments/upstream_pipeline.py')
+    adapter=importlib.util.module_from_spec(hook);hook.loader.exec_module(adapter)
+    monkeypatch.setenv('CURIOSITY_LLM_BACKEND','prepared-router')
+    seen=[]
+    def request(system,prompt,schema):
+        seen.append(schema)
+        return {'response':'class MainScene: pass'}, {'backend':'prepared-ai-router','actual_model':router_ai.MODEL}
+    monkeypatch.setattr(router_ai,'request',request)
+    llm=adapter.LocalModel('must-not-call-local')
+    assert llm.generate('Return fictional vector scene')=='class MainScene: pass'
+    assert seen[0]['required']==['response']
+    assert llm.calls[0]['actual_model']==router_ai.MODEL
