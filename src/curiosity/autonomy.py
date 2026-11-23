@@ -399,7 +399,10 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
                 sources,report=research(item['question'],item['search_terms'],item.get('subject_query',''))
             from .evidence import screen,plan_sources
             from .storyboard import source_pack
-            packed=source_pack(item['question'],sources,semantic=True)
+            if __import__('os').environ.get('CURIOSITY_SOURCE_CONTEXT')=='full-body':
+                from .storyboard import full_source_pack
+                packed=full_source_pack(sources)
+            else:packed=source_pack(item['question'],sources,semantic=True)
             # Persist the actual autonomous dossier before model availability can
             # interrupt evaluation. Continuation must keep this question/text.
             from .spec import ROOT,write_json
@@ -415,7 +418,7 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
             relevant,relevance=screen(item['question'],planned,model,endpoint)
             report['relevance']=relevance
             if not relevant:raise ResearchUnavailable('Readable sources did not directly support the exact question and mechanism.',{'research':report})
-            approved=[{**sources[index],'text':packed[index]['text'],**({'document_opening':packed[index]['document_opening']} if packed[index].get('document_opening') else {})} for index in relevance['approved_source_indices']]
+            approved=[{**sources[index],'text':packed[index]['text'],**({'source_coverage':packed[index]['source_coverage']} if packed[index].get('source_coverage') else {}),**({'document_opening':packed[index]['document_opening']} if packed[index].get('document_opening') else {})} for index in relevance['approved_source_indices']]
             return item['question'],approved,{'selection':stats,'candidates':candidates,'rejections':audit,'research':report,'operator_topic_or_source_input':False}
         except (ValueError,OSError) as error:
             details=error.metadata if isinstance(error,ModelOutputInvalid) else getattr(error,'diagnostics',{})
