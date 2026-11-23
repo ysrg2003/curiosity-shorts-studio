@@ -1,0 +1,8 @@
+{
+  "45111351142": {
+    "run_url": "https://github.com/ysrg2003/ai-provider-router/actions/runs/45111351142",
+    "invalid_files": ["research-1.json", "research-2.json", "research-3.json"],
+    "reason": "Synthetic unit-test fixtures leaked into drafts before runtime. These are not production research, cannot be resumed, and do not count as completed research or scripts.",
+    "continuation_allowed": false
+  }
+}
