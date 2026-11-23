@@ -14,6 +14,8 @@ def main(experimental_nine=False):
     history = ROOT / '.state' / 'topics.json'
     previous = json.loads(history.read_text()).get('generated_topics', []) if history.exists() else []
     previous += [json.loads(path.read_text()).get('title', '') for path in (ROOT / 'episodes').glob('*.json')]
+    from .provenance import begin
+    begin(ROOT)
     try:
         question, records, selection = select_and_research(model, previous)
     except ResearchUnavailable as error:
