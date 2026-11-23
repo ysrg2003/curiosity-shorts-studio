@@ -200,6 +200,7 @@ def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='
         from .remote_ai import ModelOutputInvalid
         try:raw,stats=ask(model,draft_system,{'topic':topic,'variation':index,'sources':packed,'sentence_catalog':sentences,'layout':prompt_layout(),'revision_feedback':feedback},drafting_schema(sentences),endpoint,42+index+attempt)
         except ModelOutputInvalid as error:
+            if error.metadata.get('transport_failure'):raise
             if isinstance(error.model_output,dict):
                 write_json(target.with_suffix(f'.invalid-contract-{attempt+1}.json'),{'diagnostic_only':True,'untrusted_model_output':True,'not_a_verified_episode':True,'model_output':error.model_output,'contract_failure':error.metadata})
             audit.append({'attempt':attempt+1,'rejected':'incomplete_or_schema_invalid_model_output','response_shape':error.metadata})
