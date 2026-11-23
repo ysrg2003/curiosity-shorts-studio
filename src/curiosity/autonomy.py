@@ -421,7 +421,7 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
             if isinstance(error,ModelOutputInvalid) and error.metadata.get('transport_failure'):
                 from .spec import ROOT,write_json
                 (ROOT/'drafts').mkdir(parents=True,exist_ok=True)
-                write_json(ROOT/'drafts/provider-stop.json',{'backend':'prepared-ai-router','stopped':True,'failure':error.metadata,'automatic_retry_or_key_rotation':False})
+                write_json(ROOT/'drafts/provider-stop.json',{'backend':__import__('os').environ.get('CURIOSITY_LLM_BACKEND','ollama'),'stopped':True,'failure':error.metadata,'automatic_retry_or_key_rotation':False})
                 audit.append({'question':item['question'],'status':'model_transport_unavailable','error_type':type(error).__name__,'details':{'model_transport':error.metadata,'research':report}})
                 raise ResearchUnavailable('Source model transport unavailable. Saved research can resume; no further candidates or model calls.',{'selection':stats,'candidates':candidates,'rejections':audit,'provider_pause':error.metadata}) from None
             if isinstance(error,ModelOutputInvalid):
