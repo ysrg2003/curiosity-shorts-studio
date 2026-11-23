@@ -240,6 +240,7 @@ def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='
     from .remote_ai import MODEL
     backend=os.environ.get('CURIOSITY_LLM_BACKEND')
     selected_model=MODEL if backend=='openrouter-free' else model
+    if backend=='prepared-router-gemini':selected_model='gemini-2.5-flash'
     if backend=='prepared-router':
         from .router_ai import MODEL as selected_model
     obj.update(visual_engine='generated-manim',schema_version=1,id=re.sub(r'[^a-z0-9]+','-',topic.lower()).strip('-')[:65]+f'-{index}',renderer='generic',language='en',
