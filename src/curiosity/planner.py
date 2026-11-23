@@ -180,7 +180,10 @@ def draft(topic, target, source_urls=None, model='qwen3:4b-instruct', endpoint='
         search,_=ask(model,'For the science question, return short primary-literature search terms, most precise first. These are search hypotheses, not factual answers. Omit question filler words. Return JSON. /no_think',{'question':topic},search_schema,endpoint,31)
         sources=discover(topic,search['queries'])
     if not 2<=len(sources)<=4:raise ValueError('Use 2 to 4 readable source records')
-    packed=source_pack(topic,sources)
+    if __import__('os').environ.get('CURIOSITY_SOURCE_CONTEXT')=='full-body':
+        from .storyboard import full_source_pack
+        packed=full_source_pack(sources)
+    else:packed=source_pack(topic,sources)
     target=Path(target);target.parent.mkdir(parents=True,exist_ok=True)
     if source_records is None:
         from .evidence import screen
