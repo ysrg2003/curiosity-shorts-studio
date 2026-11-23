@@ -225,12 +225,14 @@ def test_source_contract_failure_preserves_actual_retrieval_provenance(monkeypat
     monkeypatch.setattr(autonomy, 'questions', lambda *a, **k: (candidates, {}))
     monkeypatch.setattr(autonomy, 'research', lambda *a, **k: (sources, deepcopy(research)))
     def reject(*args, **kwargs): raise remote_ai.ModelOutputInvalid(failure)
+    monkeypatch.setattr(evidence, 'plan_sources', lambda *args:(True,{'selected_original_paths':[],'synthetic':True}))
     monkeypatch.setattr(evidence, 'screen', reject)
     with pytest.raises(autonomy.ResearchUnavailable) as found:
         autonomy.select_and_research('synthetic', [])
     audit = found.value.diagnostics['rejections'][0]
     assert audit['status'] == 'source_assessment_contract_invalid'
-    assert audit['details']['research'] == research
+    assert audit['details']['research']['retrieval_attempts'] == research['retrieval_attempts']
+    assert audit['details']['research']['source_scope_plan']['synthetic'] is True
     assert audit['details']['model_contract']['violations'][0]['path'] == ['answer']
 
 
