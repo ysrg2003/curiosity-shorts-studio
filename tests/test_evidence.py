@@ -265,11 +265,12 @@ def test_extractive_plan_keeps_distinct_generic_paths_before_any_answer(monkeypa
     def ask(model,system,prompt,shape,*args,**kwargs):
         calls.append(prompt)
         assert 'answer_claims' not in shape['properties'] and 'answer' not in shape['properties']
+        if 'exact_question_supported' in shape['properties']:return {'exact_question_supported':True,'material_paths_covered':True,'unrelated_paths_excluded':True,'missing_or_unrelated_quote_ids':[]},{}
         entries=prompt['sentence_catalog'];blue=next(k for k,v in entries.items() if 'blue lever' in v['quote'] and v['source_index']==0);red=next(k for k,v in entries.items() if 'red switch' in v['quote'] and v['source_index']==0);condition=next(k for k,v in entries.items() if v['source_index']==1)
-        return {'scope_paths':[{'role':'observation','quote_ids':[blue]},{'role':'mechanism','quote_ids':[blue]},{'role':'alternative','quote_ids':[red]},{'role':'condition','quote_ids':[condition]}],'sufficient_for_exact_question':True},{}
+        return {'source_decisions':[{'source_index':i,'relevant_to_exact_question':True} for i in range(2)],'observation_quote_ids':[blue],'mechanism_quote_ids':[blue],'alternative_quote_ids':[red],'condition_quote_ids':[condition],'sufficient_for_exact_question':True},{}
     monkeypatch.setattr(storyboard,'ask',ask)
     accepted,plan=evidence.plan_sources('Why does the fictional gate open?',records,'synthetic')
-    assert accepted and len(calls)==1 and plan['source_records_referenced']==2
+    assert accepted and len(calls)==2 and plan['source_records_referenced']==2
     assert {'mechanism','alternative','condition'}.issubset({item['role'] for item in plan['selected_original_paths']})
     for item in plan['selected_original_paths']:
         for q in item['evidence']:assert q['quote'] in records[q['source_index']]['text']
@@ -307,3 +308,25 @@ def test_source_scope_plan_executes_before_answer_and_preserves_original_paths(m
     monkeypatch.setattr(evidence,'plan_sources',plan);monkeypatch.setattr(evidence,'screen',screen)
     autonomy.select_and_research('synthetic',[])
     assert original==saved and events==['plan','answer']
+
+
+def test_named_plan_slots_and_source_decisions_are_required():
+    entries=evidence.catalog(sources());first=next(k for k in entries if k.startswith('S0'));second=next(k for k in entries if k.startswith('S1'))
+    plan={'source_decisions':[{'source_index':i,'relevant_to_exact_question':True} for i in range(2)],'observation_quote_ids':[first],'mechanism_quote_ids':[second],'condition_quote_ids':[],'alternative_quote_ids':[],'sufficient_for_exact_question':True}
+    assert evidence.validate_source_plan(plan,entries,2)[0]
+    for field in ['observation_quote_ids','mechanism_quote_ids']:
+        bad=deepcopy(plan);bad[field]=[];assert not evidence.validate_source_plan(bad,entries,2)[0]
+    bad=deepcopy(plan);bad['source_decisions'][1]['relevant_to_exact_question']=False
+    assert not evidence.validate_source_plan(bad,entries,2)[0]
+    bad=deepcopy(plan);del bad['alternative_quote_ids'];assert not evidence.validate_source_plan(bad,entries,2)[0]
+
+
+def test_structurally_valid_plan_still_fails_exact_question_or_alternative_audit(monkeypatch):
+    calls=[]
+    def ask(model,system,prompt,shape,*args,**kwargs):
+        calls.append(shape)
+        if 'exact_question_supported' in shape['properties']:return {'exact_question_supported':True,'material_paths_covered':False,'unrelated_paths_excluded':True,'missing_or_unrelated_quote_ids':['S1Q0']},{}
+        return {'source_decisions':[{'source_index':i,'relevant_to_exact_question':True} for i in range(2)],'observation_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'condition_quote_ids':[],'alternative_quote_ids':[],'sufficient_for_exact_question':True},{}
+    monkeypatch.setattr(storyboard,'ask',ask)
+    accepted,report=evidence.plan_sources('Synthetic?',sources(),'synthetic')
+    assert not accepted and len(calls)==2 and not report['pre_answer_plan_audit']['accepted']
