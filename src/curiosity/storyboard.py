@@ -87,6 +87,20 @@ def source_pack(topic,sources,budget=9500,semantic=False):
     return packed
 
 
+def full_source_pack(sources,max_source_characters=24000,max_total_characters=72000):
+    """Preserve each complete readable body for scope planning, never top-window it."""
+    import hashlib
+    packed=[]
+    for source in sources:
+        body=content_body(source['text'])
+        if len(body)>max_source_characters:raise ValueError('Full source exceeds explicit context bound; chunked scope analysis required')
+        entry={key:value for key,value in source.items() if key!='text'}
+        entry.update(text=body,source_coverage={'mode':'complete_readable_body','characters':len(body),'sha256':hashlib.sha256(body.encode()).hexdigest(),'bibliography_excluded':body!=source['text'],'semantic_window_selection':False})
+        packed.append(entry)
+    if sum(len(source['text']) for source in packed)>max_total_characters:raise ValueError('Complete source pool exceeds explicit context bound')
+    return packed
+
+
 def validate_story(obj,sources,minimum=155,maximum=255):
     lines=obj.get('lines',[])
     if not 12<=len(lines)<=16:raise ValueError('Use 12 to 16 lines, not a tiny sketch')
