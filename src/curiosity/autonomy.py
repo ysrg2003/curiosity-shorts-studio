@@ -386,7 +386,10 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
         report=None
         try:
             import os
-            if os.environ.get('CURIOSITY_DISCOVERY')=='prepared-router-leads':
+            if os.environ.get('CURIOSITY_DISCOVERY')=='prepared-router-grounded':
+                from .grounded_research import discover
+                sources,report=discover(item['question'],item['search_terms'],item.get('subject_query',''),model,endpoint)
+            elif os.environ.get('CURIOSITY_DISCOVERY')=='prepared-router-leads':
                 from .router_research import discover
                 sources,report=discover(item['question'],item['search_terms'],item.get('subject_query',''),model,endpoint)
             else:
