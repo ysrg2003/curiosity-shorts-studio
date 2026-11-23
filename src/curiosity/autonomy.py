@@ -376,10 +376,15 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
         report=None
         try:
             sources,report=research(item['question'],item['search_terms'],item.get('subject_query',''))
-            from .evidence import screen
+            from .evidence import screen,plan_sources
             from .storyboard import source_pack
             packed=source_pack(item['question'],sources,semantic=True)
-            relevant,relevance=screen(item['question'],packed,model,endpoint)
+            plan_ok,source_plan=plan_sources(item['question'],packed,model,endpoint)
+            report['source_scope_plan']=source_plan
+            report['packed_original_sources']=packed
+            if not plan_ok:raise ResearchUnavailable('Original sources did not complete pre-answer scope planning.',{'research':report})
+            planned=[{**source,**({'source_scope_plan':source_plan['selected_original_paths']} if index==0 else {})} for index,source in enumerate(packed)]
+            relevant,relevance=screen(item['question'],planned,model,endpoint)
             report['relevance']=relevance
             if not relevant:raise ResearchUnavailable('Readable sources did not directly support the exact question and mechanism.',{'research':report})
             approved=[{**sources[index],'text':packed[index]['text'],**({'document_opening':packed[index]['document_opening']} if packed[index].get('document_opening') else {})} for index in relevance['approved_source_indices']]
