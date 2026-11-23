@@ -21,7 +21,8 @@ def catalog(sources):
             key=f'S{source_index}Q{count}'
             result[key]={'source_index':source_index,'quote':quote,'start':span.start,'end':end,'publisher_group':publisher(source['url']) if source.get('url') else ''}
             count+=1
-            if count>=40:break
+            if count>=40 and source.get('source_coverage',{}).get('mode')!='complete_readable_body':break
+            if count>240:raise ValueError('Complete source sentence catalog exceeds explicit scope bound')
     if len({entry['source_index'] for entry in result.values()})<2:
         raise ValueError('Need usable whole-sentence evidence from two source records')
     return result
