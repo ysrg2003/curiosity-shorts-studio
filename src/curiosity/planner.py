@@ -72,11 +72,18 @@ def source_bytes(url):
             if len(raw) > 2_000_000: raise SourceValidationError('source_too_large', 'Source exceeds 2 MB')
             result = (final, raw, response.headers.get('Content-Type', ''))
     except HTTPError as error:
-        metadata = {'kind': 'http_error', 'provider': provider, 'http_status': int(error.code),
+        # HTTPError after a redirect belongs to the failing final hop, not the
+        # original citation gateway. Do not suppress all gateway citations when
+        # just one publisher rejects a read.
+        failed_url=error.geturl() or url
+        failed_host=(urlparse(failed_url).hostname or host).lower()
+        failed_wikimedia=failed_host=='wikipedia.org' or failed_host.endswith('.wikipedia.org') or failed_host=='wikimedia.org' or failed_host.endswith('.wikimedia.org')
+        failed_provider='wikimedia' if failed_wikimedia else failed_host
+        metadata = {'kind': 'http_error', 'provider': failed_provider, 'http_status': int(error.code),
                     'retry_after_seconds': retry_after_seconds(error.headers.get('Retry-After')) if error.headers else None,
                     'provider_stop': error.code in (401, 403, 429, 503), 'network_attempted': True}
         _SOURCE_FAILURES[url] = metadata
-        if metadata['provider_stop']: _PROVIDER_STOPS[provider] = metadata
+        if metadata['provider_stop']: _PROVIDER_STOPS[failed_provider] = metadata
         raise SourceReadError(metadata) from None
     except URLError as error:
         metadata = {'kind': 'transport_error', 'provider': provider, 'reason_type': type(error.reason).__name__,
