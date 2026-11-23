@@ -176,7 +176,7 @@ def test_remote_path_preserves_same_full_contract_and_specific_diagnostics(monke
 def source_contract_fixture():
     sources = [{'url': 'https://example.org/fixture', 'text': 'Synthetic objects move inside this fictional bounded test fixture.'},
                {'url': 'https://example.net/fixture', 'text': 'This fictional fixture describes synthetic objects moving inside a bounded test.'}]
-    verdict = {'scope_constraints':[], 'topic_assessment': {'suitable': True, 'reason': 'fits_short_visual_science'},
+    verdict = {'answer_claims':[{'sentence':sources[0]['text'],'quote_ids':['S0Q0','S1Q0']}], 'scope_constraints':[], 'topic_assessment': {'suitable': True, 'reason': 'fits_short_visual_science'},
                'source_assessments': [{'source_index': i, 'usable': True, 'reason': 'current_observation_or_mechanism'} for i in range(2)],
                'answer': sources[0]['text'], 'answer_quote_ids': ['S0Q0', 'S1Q0'], 'supported': True,
                'observable_quote_ids': ['S0Q0'], 'mechanism_quote_ids': ['S1Q0'], 'issues': []}
@@ -259,7 +259,7 @@ def test_negative_empty_answer_is_valid_data_and_does_not_trigger_rewrite_or_sci
     from curiosity import evidence
     from jsonschema import Draft202012Validator
     sources, verdict, failure = source_contract_fixture(); calls = []
-    verdict.update(supported=False, answer='', answer_quote_ids=[], issues=['answer_not_supported'])
+    verdict.update(supported=False, answer='', answer_quote_ids=[], answer_claims=[], issues=['answer_not_supported'])
     def ask(model, system, prompt, schema, *args, **kwargs):
         calls.append(1)
         assert Draft202012Validator(schema).is_valid(verdict)
@@ -391,3 +391,25 @@ def test_semantic_discovery_never_deletes_a_page_for_sparse_word_overlap(monkeyp
     assert sources[0]['title']=='Inclined plane' and set(seen)=={1,2}
     assert audit['retrieval_logits_are_not_probabilities'] and audit['retrieval_window_tokens']==512
     assert all(row['status']!='subject_mismatch_skipped' for row in audit['discovery'])
+
+
+def test_sentence_specific_answer_evidence_covers_every_original_sentence(monkeypatch):
+    entries={'A':{'quote':'Synthetic gears turn only when the fictional lever is pressed.'},'B':{'quote':'Synthetic flags rise only when their fictional rope is pulled.'}}
+    calls=[]
+    def scores(pairs):calls.extend(pairs);return {'accepted':True,'pairs':[{'accepted':True} for _ in pairs]}
+    monkeypatch.setattr(entailment,'score_pairs',scores)
+    one='Synthetic gears turn when the fictional lever is pressed.';two='Synthetic flags rise when their fictional rope is pulled.'
+    verdict={'answer':one+' '+two,'answer_quote_ids':['A','B'],'answer_claims':[{'sentence':one,'quote_ids':['A']},{'sentence':two,'quote_ids':['B']}]}
+    assert entailment.source_answer('Why do synthetic gears turn?',verdict,entries)['accepted']
+    assert calls==[(entries['A']['quote'],one),(entries['B']['quote'],two)]
+    verdict['answer_claims'][1]['sentence']='Modified invented sentence.'
+    assert not entailment.source_answer('Why do synthetic gears turn?',verdict,entries)['accepted']
+
+
+def test_scope_critic_factual_basis_requires_independent_entailment(monkeypatch):
+    entries={'A':{'quote':'Synthetic fixtures usually turn in this fictional test.'}};calls=[]
+    def scores(pairs):calls.extend(pairs);return {'accepted':False,'pairs':[{'accepted':False}]}
+    monkeypatch.setattr(entailment,'score_pairs',scores)
+    finding={'source_claim':'Synthetic fixtures cannot turn without this fictional test.','quote_ids':['A']}
+    assert not entailment.scope_findings([finding],entries)['accepted']
+    assert calls==[(entries['A']['quote'],finding['source_claim'])]
