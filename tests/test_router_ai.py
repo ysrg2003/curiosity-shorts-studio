@@ -84,3 +84,9 @@ def test_gemini_json_is_explicit_not_automatic_fallback(monkeypatch):
     monkeypatch.setattr(router_ai,'request',lambda *a,**k:pytest.fail('Stopped OpenRouter path must not run'))
     assert storyboard.ask('ignored','synthetic',{}, {'type':'object'})[0]=={'ok':True}
     assert len(calls)==1
+
+
+def test_known_openrouter_stop_blocks_before_pricing_or_key_access(monkeypatch):
+    monkeypatch.setenv('CURIOSITY_OPENROUTER_STOPPED','1')
+    monkeypatch.setattr(router_ai,'verify_free_model',lambda:pytest.fail('Stopped provider pricing must not be called'))
+    with pytest.raises(ValueError,match='stopped'):router_ai.request('test',{}, {})
