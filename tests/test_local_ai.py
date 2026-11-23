@@ -110,3 +110,15 @@ def test_response_probe_does_not_accept_truthy_non_booleans_or_length_finish(mon
     assert not local_ai.probe()['accepted']
     response[0]={'response':'{"ready":true}','done':True,'done_reason':'length'}
     assert not local_ai.probe()['accepted']
+
+
+def test_experimental_nine_is_explicit_and_does_not_change_generation_default():
+    from curiosity.spec import ROOT
+    assert local_ai.EXPERIMENTAL_MODEL=='qwen3.5:9b'
+    assert len(local_ai.EXPERIMENTAL_MANIFEST)==64
+    assert json.loads((ROOT/'studio.json').read_text())['draft_model']==local_ai.MODEL
+    text=(ROOT/'.github/workflows/check-script.yml').read_text()
+    assert 'default: false' in text and 'ollama pull qwen3.5:9b' in text
+    assert 'python -m curiosity.local_ai --experimental-nine' in text
+    assert 'python -m curiosity.script_preflight --experimental-nine' in text
+    assert 'secrets.' not in text and 'schedule:' not in text
