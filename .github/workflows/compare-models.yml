@@ -39,10 +39,7 @@ jobs:
           cat > /tmp/compare.py <<'PY'
           import json, subprocess, time, urllib.request, traceback
           from pathlib import Path
-          models = [
-              ('qwen3:4b-instruct', '0edcdef34593eac1aa2be9c7d06c432dcf81945adca5eca2f27662c18f168ba0'),
-              ('qwen3.5:4b', 'd8b0f5e9760cd1682034f292d7ef72ec46f432149be0df7574bf2d6e92e38c04'),
-          ]
+          models = [('qwen3.5:9b', '56671c2ab9385f9cfcb404638e32cd62d88e3501d44822208363c010179a3c90')]
           def api(path, payload=None, timeout=420):
               body=None if payload is None else json.dumps(payload).encode()
               req=urllib.request.Request('http://127.0.0.1:11434/api/'+path, data=body, headers={'Content-Type':'application/json'})
@@ -93,6 +90,7 @@ jobs:
                           'Optional helpers are not requirements. Explain missing information and the decision briefly, do not invent facts. '
                           'First reason briefly from the quotes, then name missing information, then select IDs and decide sufficiency last. '
                           'Unrelated means outside the question, not merely incomplete on its own. A useful partial mechanism is not unrelated. '
+                          'An empty missing_information string means no missing information. Do not use the literal word None. '
                           'Return the JSON schema fields only.\n'+json.dumps(fixture))
                       started=time.monotonic();row={'name':case['name']};record['cases'].append(row);save()
                       try:
