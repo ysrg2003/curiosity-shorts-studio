@@ -174,3 +174,9 @@ The model authors at most three original answer sentence units, not a second dup
 ### Source-first execution boundary
 
 Before requesting any answer, a separate extractive planning call selects original observation, mechanism, condition and alternative sentence IDs. Missing/invalid IDs, no mechanism, no observation or fewer than two source records stop that candidate before the writer. It does not invent prose or certify science. The answer writer receives the literal selected original source paths and still independently reassesses suitability, source relevance, alternatives and entailment. Its generation order is source assessments and scope before answer units. A plan that is empty or unsupported is not made correct by being immutable. All original plans and source passages remain diagnostic evidence.
+
+### Explicit source-plan slots
+
+The extractive pre-answer planner fills named observation, mechanism, condition and alternative ID fields after explicit per-source relevance decisions. Missing fields, empty observation/mechanism, invalid IDs, selected irrelevant sources and fewer than two sources fail before answer generation. Empty condition/alternative fields are permitted only when the planner finds none; downstream complete-passage scope review remains responsible for detecting omitted material pathways. Named slots improve structural coverage, not scientific certainty.
+
+A separate bounded plan audit compares the extractive slots against the full source catalog for exact-question relevance and missing material alternatives before the writer can run. Any negative flag or listed missing/unrelated ID rejects that candidate, without silently repairing the plan. This is another provisional model check, not independent scientific approval.
