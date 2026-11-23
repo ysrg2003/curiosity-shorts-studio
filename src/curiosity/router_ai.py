@@ -62,13 +62,16 @@ def engine():
     (config/'invocation_profiles.json').write_text(json.dumps(profiles))
     router=AIRouter(config_dir=config,state_db=Path(temp.name)/'state.db')
     router.config.policy=dataclasses.replace(router.config.policy,max_attempts=1,request_timeout_seconds=120)
+    from .provider_diagnostics import install
+    install(router)
+    router._curiosity_response_shape={}
     router._curiosity_failures=[]
     record_failure=router.store.record_failure
     def sanitized_failure(**kwargs):
         category=kwargs.get('error_class')
         allowed={'rate_limit','quota','auth','invalid_or_unknown','transient','unsupported','permission','model_unavailable'}
         status=kwargs.get('status_code')
-        router._curiosity_failures.append({'category':category if category in allowed else 'other','http_status':status if isinstance(status,int) and 100<=status<=599 else None})
+        router._curiosity_failures.append({'category':category if category in allowed else 'other','http_status':status if isinstance(status,int) and 100<=status<=599 else None,'response_shape':getattr(router,'_curiosity_response_shape',{})})
         return record_failure(**kwargs)
     router.store.record_failure=sanitized_failure
     old=router._ordered_keys
