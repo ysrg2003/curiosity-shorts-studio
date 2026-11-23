@@ -5,6 +5,7 @@ import re
 
 def catalog(sources):
     import pysbd
+    from .autonomy import publisher
     segmenter=pysbd.Segmenter(language='en',clean=False,char_span=True)
     result={}
     for source_index,source in enumerate(sources):
@@ -18,7 +19,7 @@ def catalog(sources):
             if not re.search(r'[.!?][\"\')\]]*$',quote):continue
             if quote not in text:raise ValueError('Sentence span did not preserve the original source')
             key=f'S{source_index}Q{count}'
-            result[key]={'source_index':source_index,'quote':quote,'start':span.start,'end':end}
+            result[key]={'source_index':source_index,'quote':quote,'start':span.start,'end':end,'publisher_group':publisher(source['url']) if source.get('url') else ''}
             count+=1
             if count>=40:break
     if len({entry['source_index'] for entry in result.values()})<2:
@@ -96,9 +97,10 @@ def screen_once(question,sources,model,endpoint='http://127.0.0.1:11434'):
     chosen=verdict.get('observable_quote_ids',[])+verdict.get('mechanism_quote_ids',[])
     valid=all(key in entries for key in chosen)
     groups={entries[key]['source_index'] for key in chosen if key in entries}
+    publisher_groups={entries[key]['publisher_group'] for key in chosen if key in entries and entries[key].get('publisher_group')}
     topic=verdict.get('topic_assessment',{})
     topic_ok=isinstance(topic,dict) and topic.get('suitable') is True and topic.get('reason')=='fits_short_visual_science'
-    accepted=topic_ok and verdict.get('supported') is True and bool(verdict.get('observable_quote_ids')) and bool(verdict.get('mechanism_quote_ids')) and len(groups)>=2 and valid and complete and consistent and groups.issubset(usable) and not verdict.get('issues')
+    accepted=topic_ok and verdict.get('supported') is True and bool(verdict.get('observable_quote_ids')) and bool(verdict.get('mechanism_quote_ids')) and len(groups)>=2 and len(publisher_groups)>=2 and valid and complete and consistent and groups.issubset(usable) and not verdict.get('issues')
     answer_ids=verdict.get('answer_quote_ids',[])
     answer_valid=bool(answer_ids) and all(key in entries and entries[key]['source_index'] in usable and entries[key]['source_index'] in groups for key in answer_ids)
     support={'accepted':False,'reason':'Upstream topic/source or answer-evidence validation failed'}
@@ -130,7 +132,7 @@ def screen_once(question,sources,model,endpoint='http://127.0.0.1:11434'):
     snapshot_sources=[{'source_index':index,'url':source['url'],'title':source.get('title',''),
                        'source_scope':source.get('source_scope','unspecified_excerpt'),
                        'excerpt_sha256':hashlib.sha256(source['text'].encode()).hexdigest()} for index,source in enumerate(sources)]
-    return accepted,{'verdict':verdict,'selected_original_evidence':evidence_snapshot,'source_snapshot':snapshot_sources,'packed_original_sources':deepcopy(sources),'scope_plan_validation':scope_plan,'pre_answer_source_plan':source_plan,'model':stats,'assessment_attempts':attempts,'independent_entailment':support,'source_records_referenced':len(groups),'source_records_usable':len(usable),'source_assessments_complete':complete,'source_decisions_consistent':consistent,'topic_suitability_accepted':topic_ok,'approved_source_indices':sorted(groups) if accepted else [],'accepted':accepted,'not_a_truth_guarantee':True}
+    return accepted,{'verdict':verdict,'selected_original_evidence':evidence_snapshot,'source_snapshot':snapshot_sources,'packed_original_sources':deepcopy(sources),'scope_plan_validation':scope_plan,'pre_answer_source_plan':source_plan,'model':stats,'assessment_attempts':attempts,'independent_entailment':support,'source_records_referenced':len(groups),'publisher_groups_referenced':len(publisher_groups),'source_records_usable':len(usable),'source_assessments_complete':complete,'source_decisions_consistent':consistent,'topic_suitability_accepted':topic_ok,'approved_source_indices':sorted(groups) if accepted else [],'accepted':accepted,'not_a_truth_guarantee':True}
 
 
 def screen(question,sources,model,endpoint='http://127.0.0.1:11434'):
@@ -209,5 +211,6 @@ def validate_source_plan(plan,entries,source_count,stats=None):
     valid=all(field in plan and isinstance(plan[field],list) and len(plan[field])<=4 and all(key in entries for key in plan[field]) for field in fields.values())
     keys=list(dict.fromkeys(key for item in paths for key in item['quote_ids'] if key in entries))
     groups={entries[key]['source_index'] for key in keys}
-    accepted=plan.get('sufficient_for_exact_question') is True and complete and valid and bool(plan.get('observation_quote_ids')) and bool(plan.get('mechanism_quote_ids')) and len(groups)>=2 and groups.issubset(relevant)
-    return accepted,{'selection':plan,'selected_original_paths':[{'role':item['role'],'evidence':[{'quote_id':key,**entries[key]} for key in item['quote_ids'] if key in entries]} for item in paths], 'source_records_referenced':len(groups),'source_decisions_complete':complete,'generation':stats or {},'accepted':accepted,'not_a_truth_guarantee':True}
+    publisher_groups={entries[key]['publisher_group'] for key in keys if entries[key].get('publisher_group')}
+    accepted=plan.get('sufficient_for_exact_question') is True and complete and valid and bool(plan.get('observation_quote_ids')) and bool(plan.get('mechanism_quote_ids')) and len(groups)>=2 and len(publisher_groups)>=2 and groups.issubset(relevant)
+    return accepted,{'selection':plan,'selected_original_paths':[{'role':item['role'],'evidence':[{'quote_id':key,**entries[key]} for key in item['quote_ids'] if key in entries]} for item in paths], 'source_records_referenced':len(groups),'publisher_groups_referenced':len(publisher_groups),'source_decisions_complete':complete,'generation':stats or {},'accepted':accepted,'not_a_truth_guarantee':True}
