@@ -21,7 +21,12 @@ def main(experimental_nine=False):
         raise
     write_json(target.with_suffix('.selection.json'), selection)
     draft(question, target, model=model, source_records=records)
+    import os
+    backend=os.environ.get('CURIOSITY_LLM_BACKEND','ollama')
+    if backend=='prepared-router':
+        from .router_ai import MODEL as model
     write_json(ROOT / 'drafts' / 'preflight-result.json', {
+        'backend':backend,
         'experimental_model':experimental_nine,'model':model,'automated_script_checks_passed': True, 'operator_topic_or_source_input': False,
         'audio_created': False, 'video_created': False, 'upload_attempted': False,
         'human_scientific_and_story_review_still_required': True})
