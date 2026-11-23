@@ -23,6 +23,7 @@ def main(experimental_nine=False):
     draft(question, target, model=model, source_records=records)
     import os
     backend=os.environ.get('CURIOSITY_LLM_BACKEND','ollama')
+    if backend=='prepared-router-gemini':model='gemini-2.5-flash'
     if backend=='prepared-router':
         from .router_ai import MODEL as model
     write_json(ROOT / 'drafts' / 'preflight-result.json', {
