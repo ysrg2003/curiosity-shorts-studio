@@ -93,7 +93,25 @@ def source_answer(question, verdict, entries):
         validate_narration({'lines': [{'text': answer}]}, [{'text': premise}])
     except ValueError as error:
         return {'accepted': False, 'reason': str(error)}
-    return score_pairs([(premise, sentence.strip()) for sentence in sentences if sentence.strip()])
+    claims=verdict.get('answer_claims')
+    if claims is None:
+        return score_pairs([(premise, sentence.strip()) for sentence in sentences if sentence.strip()])
+    expected=[sentence.strip() for sentence in sentences if sentence.strip()]
+    if not isinstance(claims,list) or [item.get('sentence') for item in claims]!=expected or ' '.join(expected)!=answer:
+        return {'accepted':False,'reason':'Answer claims must preserve every original sentence exactly'}
+    union=list(dict.fromkeys(key for item in claims for key in item.get('quote_ids',[])))
+    if set(union)!=set(selected) or any(not item.get('quote_ids') or any(key not in entries for key in item['quote_ids']) for item in claims):
+        return {'accepted':False,'reason':'Answer sentence citations do not match declared original evidence'}
+    report=score_pairs([('\n'.join(entries[key]['quote'] for key in item['quote_ids']),item['sentence']) for item in claims])
+    report['sentence_specific_evidence']=True
+    for row,item in zip(report['pairs'],claims):row['quote_ids']=item['quote_ids']
+    return report
+
+
+def scope_findings(findings,entries):
+    if not findings or any(not item.get('source_claim') or not item.get('quote_ids') or any(key not in entries for key in item['quote_ids']) for item in findings):
+        return {'accepted':False,'reason':'Scope finding lacks source-bound factual basis'}
+    return score_pairs([('\n'.join(entries[key]['quote'] for key in item['quote_ids']),item['source_claim']) for item in findings])
 
 
 def story(obj):
