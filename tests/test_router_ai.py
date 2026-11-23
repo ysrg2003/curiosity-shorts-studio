@@ -90,3 +90,26 @@ def test_known_openrouter_stop_blocks_before_pricing_or_key_access(monkeypatch):
     monkeypatch.setenv('CURIOSITY_OPENROUTER_STOPPED','1')
     monkeypatch.setattr(router_ai,'verify_free_model',lambda:pytest.fail('Stopped provider pricing must not be called'))
     with pytest.raises(ValueError,match='stopped'):router_ai.request('test',{}, {})
+
+
+def test_provider_stop_survives_engine_reset_and_blocks_before_key_access(monkeypatch,tmp_path):
+    from curiosity import spec
+    monkeypatch.setattr(spec,'ROOT',tmp_path)
+    monkeypatch.setattr(router_ai,'_STOPPED',{})
+    router_ai.stop_provider('google_gemini',{'provider_failures':[{'http_status':429,'category':'quota'}]})
+    router_ai._STOPPED.clear()
+    with pytest.raises(remote_ai.ModelOutputInvalid) as e:router_ai.require_available('google_gemini')
+    assert e.value.metadata['provider_stopped']
+
+
+def test_writer_transport_failure_is_not_schema_revision(monkeypatch,tmp_path):
+    from curiosity import planner
+    from test_story_slots import records
+    calls=[]
+    monkeypatch.setattr(storyboard,'source_pack',lambda topic,sources:sources)
+    def fail(*a,**k):
+        calls.append(1)
+        raise remote_ai.ModelOutputInvalid({'transport_failure':True})
+    monkeypatch.setattr(storyboard,'ask',fail)
+    with pytest.raises(remote_ai.ModelOutputInvalid):planner.draft('Synthetic?',tmp_path/'episode.json',source_records=records())
+    assert len(calls)==1
