@@ -303,12 +303,22 @@ def research(question,terms,subject_query=""):
     selected=encyclopedias[:1];selected_groups={publisher(source['url']) for source in selected}
     candidates=[{'url':source['url'],'title':source.get('title',''),'publisher':publisher(source['url']),
                  'source_scope':source.get('source_scope','article_excerpt'),
-                 'retrieval_rank':weight_by_url[source['url']]} for source in ranked]
+                 'retrieval_rank':weight_by_url[source['url']],'selection_is_not_adequacy':True} for source in ranked]
+    # First preserve publisher diversity, then use remaining slots for a second
+    # ranked document from an existing publisher. Retrieval order is fallible;
+    # grouping must not erase all alternatives before relevance assessment.
     for source in ranked:
         group=publisher(source['url'])
         if group in selected_groups:continue
         selected.append(source);selected_groups.add(group)
         if len(selected)>=4:break
+    counts={group:sum(publisher(item['url'])==group for item in selected) for group in selected_groups}
+    selected_urls={item['url'] for item in selected}
+    for source in ranked:
+        if len(selected)>=4:break
+        group=publisher(source['url'])
+        if source['url'] in selected_urls or counts.get(group,0)>=2:continue
+        selected.append(source);selected_urls.add(source['url']);counts[group]=counts.get(group,0)+1
     sources=selected;groups=selected_groups
     if len(groups)>=2:return sources,{**report(),'document_candidates':candidates,'subject_query_is_not_fact':True}
 
