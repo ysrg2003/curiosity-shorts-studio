@@ -265,6 +265,7 @@ def test_later_more_relevant_document_is_not_suppressed_by_same_publisher(monkey
     monkeypatch.setattr(autonomy,'article',article)
     sources,audit=autonomy.research('Why does a synthetic fixture move?','synthetic mechanism')
     assert len(reads)==2 and sources[1]['url'].endswith('later')
+    assert any(source['url'].endswith('early') for source in sources)
     assert len(audit['document_candidates'])==2 and len(audit['retrieval_attempts'])==2
 
 
@@ -443,3 +444,15 @@ def test_education_government_host_rules_are_generic_not_a_topic_whitelist():
     assert autonomy.eligible_reference('https://fictional.ac.uk/article')
     assert not autonomy.eligible_reference('https://fictional.gov.attacker.invalid/article')
     assert not autonomy.eligible_reference('https://fictional.gov/search?q=example')
+
+
+def test_two_same_publisher_candidates_survive_wrong_ranking_before_source_judgment(monkeypatch):
+    monkeypatch.setattr(autonomy,'public_url',lambda url:url)
+    monkeypatch.setattr(autonomy,'wiki_pages',lambda query:[page()])
+    monkeypatch.setattr(autonomy,'wiki_links',lambda index:[{'url':'https://fixture.edu/high'},{'url':'https://fixture.edu/low'},{'url':'https://fixture.edu/third'}])
+    monkeypatch.setattr(autonomy,'article',lambda url:{'url':url,'title':'Synthetic fixture motion' if url.endswith('high') else 'Fictional obscure record','text':'Synthetic fixture motion. '*40})
+    monkeypatch.setattr(storyboard,'passage_rank',lambda q,text,title:10 if 'motion' in title else -10)
+    sources,audit=autonomy.research('Why does a synthetic fixture move?','synthetic mechanism')
+    assert len(sources)==3 and sum(autonomy.publisher(item['url'])=='fixture.edu' for item in sources)==2
+    assert any(item['url'].endswith('low') for item in sources)
+    assert len(audit['document_candidates'])==3 and len(audit['retrieval_attempts'])==3
