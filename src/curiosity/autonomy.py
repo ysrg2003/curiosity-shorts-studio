@@ -61,6 +61,9 @@ def questions(model,previous,endpoint='http://127.0.0.1:11434',seed=43):
         try:
             data,stats=ask(model,'Propose exactly 3 distinct, visually explainable everyday science questions for a playful English educational cartoon. Choose from physics, chemistry, astronomy, weather or ordinary nonmedical biology. Do not propose medical advice, disease, politics, product claims or current events. These are unverified research hypotheses, not factual answers. Avoid the supplied previous topics. Each question is 10 to 110 characters. subject_query is a 1 to 6 word encyclopedia-style subject phrase, 3 to 80 characters, naming the observable subject of the question, not its proposed cause. Include a domain qualifier if ambiguous. search_terms is 3 to 150 characters and names a proposed mechanism as an unverified search hypothesis, never an established fact. Return JSON only. /no_think',{'previous_topics':previous[-100:],'proposal_variation':attempt+1,'revision_feedback':attempts[-1].get('rejected') if attempts else ''},schema,endpoint,seed+attempt)
         except ModelOutputInvalid as error:
+            if error.metadata.get('transport_failure'):
+                attempts.append({'attempt':attempt+1,'rejected':'model_transport_unavailable','response_shape':error.metadata})
+                raise ResearchUnavailable('Topic model transport unavailable. No immediate retry or fallback.',{'proposal_attempts':attempts,'operator_topic_or_source_input':False}) from None
             attempts.append({'attempt':attempt+1,'rejected':'schema_invalid','response_shape':error.metadata});continue
         result=[];checks=[]
         for item in data.get('candidates',[]):
