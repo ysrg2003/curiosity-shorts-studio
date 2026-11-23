@@ -42,3 +42,15 @@ def test_generated_motion_uses_prepared_router_not_local_model(monkeypatch):
     assert llm.generate('Return fictional vector scene')=='class MainScene: pass'
     assert seen[0]['required']==['response']
     assert llm.calls[0]['actual_model']==router_ai.MODEL
+
+
+def test_transport_failure_is_not_retried_as_schema_repair(monkeypatch):
+    from curiosity import autonomy
+    calls=[]
+    def ask(*args,**kwargs):
+        calls.append(1)
+        raise remote_ai.ModelOutputInvalid({'transport_failure':True,'provider_failures':[{'http_status':429,'category':'rate_limit'}]})
+    monkeypatch.setattr(autonomy,'ask',ask)
+    with pytest.raises(autonomy.ResearchUnavailable) as e:autonomy.questions('fictional',[])
+    assert len(calls)==1
+    assert e.value.diagnostics['proposal_attempts'][0]['rejected']=='model_transport_unavailable'
