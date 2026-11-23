@@ -70,6 +70,7 @@ def request(system,prompt,schema,effort='none'):
     global _LAST_REQUEST,_REQUESTS
     from .remote_ai import ModelOutputInvalid
     from .storyboard import schema_failures
+    if os.environ.get('CURIOSITY_OPENROUTER_STOPPED')=='1' or (Path(__file__).resolve().parents[2]/'drafts/openrouter-stop.json').exists():raise ValueError('OpenRouter stopped; explicit external resolution required')
     if effort not in {'none','low'}:raise ValueError('Unsupported bounded router effort')
     if _REQUESTS>=MAX_REQUESTS:raise ValueError('Bounded router request budget exhausted; no fallback')
     verified=verify_free_model()
