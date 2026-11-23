@@ -330,3 +330,16 @@ def test_structurally_valid_plan_still_fails_exact_question_or_alternative_audit
     monkeypatch.setattr(storyboard,'ask',ask)
     accepted,report=evidence.plan_sources('Synthetic?',sources(),'synthetic')
     assert not accepted and len(calls)==2 and not report['pre_answer_plan_audit']['accepted']
+
+
+def test_same_publisher_records_do_not_replace_independent_evidence_groups(monkeypatch):
+    packed=sources();packed[1]['url']='https://example.edu/other'
+    entries=evidence.catalog(packed)
+    first=next(key for key in entries if key.startswith('S0'))
+    second=next(key for key in entries if key.startswith('S1'))
+    plan={'source_decisions':[{'source_index':i,'relevant_to_exact_question':True} for i in range(2)],
+          'observation_quote_ids':[first],'mechanism_quote_ids':[second],
+          'condition_quote_ids':[],'alternative_quote_ids':[],'sufficient_for_exact_question':True}
+    accepted,report=evidence.validate_source_plan(plan,entries,2)
+    assert not accepted and report['publisher_groups_referenced']==1
+    assert report['source_records_referenced']==2
