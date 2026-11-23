@@ -10,6 +10,8 @@ def resume(path,model):
     record=json.loads(Path(path).read_text())
     if record.get('schema_version')!=1 or record.get('operator_topic_or_source_input') is not False:
         raise ValueError('Not an autonomous original research dossier')
+    from .provenance import validate
+    validate(record,json.loads((Path(path).parent/'runtime.json').read_text()))
     question=record['question'];packed=record['packed_original_sources'];target=ROOT/'drafts/episode-1.json'
     target.parent.mkdir(parents=True,exist_ok=True)
     ok,plan=plan_sources(question,packed,model)
