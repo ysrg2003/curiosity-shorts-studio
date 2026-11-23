@@ -54,6 +54,7 @@ def test_failed_topic_gate_never_starts_script_audio_or_video(monkeypatch, tmp_p
     monkeypatch.setenv('VIDEO_COUNT', '1')
     monkeypatch.setenv('CURIOSITY_LLM_BACKEND', 'ollama')
     candidates = [{'question': f'Why does synthetic fixture {i} move?', 'search_terms': 'synthetic test'} for i in range(3)]
+    monkeypatch.setattr(evidence, 'plan_sources', lambda *args:(True,{'selected_original_paths':[],'synthetic':True}))
     monkeypatch.setattr(autonomy, 'questions', lambda *a, **k: (candidates, {}))
     monkeypatch.setattr(autonomy, 'research', lambda *a, **k: (records(), {}))
     def assess(*args, **kwargs):
