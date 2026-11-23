@@ -170,3 +170,7 @@ The source writer maps each original answer sentence to its own source sentence 
 ### Single-authored answer units
 
 The model authors at most three original answer sentence units, not a second duplicated answer. The application joins them with single spaces and derives citation IDs mechanically. It never trims, pads or rewrites them; the existing500character answer cap still rejects excess output. Fresh assessment receives only independently entailed source propositions and original IDs, not the critic's unchecked explanation prose. Relevance of those propositions must still be reassessed. Original criticism remains in diagnostics, and its prior report survives a retry contract failure. No rejection is a scientific approval.
+
+### Source-first execution boundary
+
+Before requesting any answer, a separate extractive planning call selects original observation, mechanism, condition and alternative sentence IDs. Missing/invalid IDs, no mechanism, no observation or fewer than two source records stop that candidate before the writer. It does not invent prose or certify science. The answer writer receives the literal selected original source paths and still independently reassesses suitability, source relevance, alternatives and entailment. Its generation order is source assessments and scope before answer units. A plan that is empty or unsupported is not made correct by being immutable. All original plans and source passages remain diagnostic evidence.
