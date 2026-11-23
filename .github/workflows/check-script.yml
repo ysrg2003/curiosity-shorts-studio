@@ -1,6 +1,11 @@
 name: Validate automatic topic and script before media
 on:
   workflow_dispatch:
+    inputs:
+      experimental_nine:
+        description: Test pinned Qwen3.5-9B without changing production model
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency:
@@ -11,6 +16,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
+      EXPERIMENTAL_NINE: ${{ inputs.experimental_nine }}
       CURIOSITY_LLM_BACKEND: ollama
       OMP_NUM_THREADS: '2'
     steps:
@@ -44,10 +50,20 @@ jobs:
             if curl --fail --silent http://127.0.0.1:11434/api/tags; then break; fi
             sleep 1
           done
-          /tmp/ollama/bin/ollama pull qwen3:4b-instruct
-          python -m curiosity.local_ai
+          if [ "$EXPERIMENTAL_NINE" = true ]; then
+            /tmp/ollama/bin/ollama pull qwen3.5:9b
+            python -m curiosity.local_ai --experimental-nine
+          else
+            /tmp/ollama/bin/ollama pull qwen3:4b-instruct
+            python -m curiosity.local_ai
+          fi
       - name: Automatic topic, source and script acceptance only
-        run: python -m curiosity.script_preflight
+        run: |
+          if [ "$EXPERIMENTAL_NINE" = true ]; then
+            python -m curiosity.script_preflight --experimental-nine
+          else
+            python -m curiosity.script_preflight
+          fi
       - name: Retain diagnostic scripts, never credentials or model caches
         if: always()
         uses: actions/upload-artifact@v4
