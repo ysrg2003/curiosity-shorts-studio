@@ -22,8 +22,11 @@ class LocalModel:
     def __init__(self,model='qwen2.5-coder:7b',source=''):
         self.model=model;self.source=source;self.calls=[]
     def generate(self,prompt,system=None,json_mode=False):
-        if os.environ.get('CURIOSITY_LLM_BACKEND')=='prepared-router':
-            from curiosity.router_ai import request
+        if os.environ.get('CURIOSITY_LLM_BACKEND') in {'prepared-router','prepared-router-gemini'}:
+            if os.environ.get('CURIOSITY_LLM_BACKEND')=='prepared-router-gemini':
+                from curiosity.router_ai import gemini_request as request
+            else:
+                from curiosity.router_ai import request
             if self.source:prompt+='\nUse only the supplied source URL for citations: '+self.source
             if json_mode:
                 schema={'type':'object'}
