@@ -400,6 +400,12 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
             from .evidence import screen,plan_sources
             from .storyboard import source_pack
             packed=source_pack(item['question'],sources,semantic=True)
+            # Persist the actual autonomous dossier before model availability can
+            # interrupt evaluation. Continuation must keep this question/text.
+            from .spec import ROOT,write_json
+            dossier=ROOT/'drafts'/('research-'+str(len(audit)+1)+'.json')
+            dossier.parent.mkdir(parents=True,exist_ok=True)
+            write_json(dossier,{'schema_version':1,'question':item['question'],'source_records':sources,'packed_original_sources':packed,'research':report,'operator_topic_or_source_input':False,'source_acceptance_completed':False})
             plan_ok,source_plan=plan_sources(item['question'],packed,model,endpoint)
             report['source_scope_plan']=source_plan
             report['packed_original_sources']=packed
@@ -412,6 +418,12 @@ def select_and_research(model,previous,endpoint='http://127.0.0.1:11434',seed=43
             return item['question'],approved,{'selection':stats,'candidates':candidates,'rejections':audit,'research':report,'operator_topic_or_source_input':False}
         except (ValueError,OSError) as error:
             details=error.metadata if isinstance(error,ModelOutputInvalid) else getattr(error,'diagnostics',{})
+            if isinstance(error,ModelOutputInvalid) and error.metadata.get('transport_failure'):
+                from .spec import ROOT,write_json
+                (ROOT/'drafts').mkdir(parents=True,exist_ok=True)
+                write_json(ROOT/'drafts/provider-stop.json',{'backend':'prepared-ai-router','stopped':True,'failure':error.metadata,'automatic_retry_or_key_rotation':False})
+                audit.append({'question':item['question'],'status':'model_transport_unavailable','error_type':type(error).__name__,'details':{'model_transport':error.metadata,'research':report}})
+                raise ResearchUnavailable('Source model transport unavailable. Saved research can resume; no further candidates or model calls.',{'selection':stats,'candidates':candidates,'rejections':audit,'provider_pause':error.metadata}) from None
             if isinstance(error,ModelOutputInvalid):
                 status='source_assessment_contract_invalid'
                 details={'model_contract':details,'untrusted_original_output':error.model_output,'research':report}
