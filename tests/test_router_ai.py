@@ -54,3 +54,33 @@ def test_transport_failure_is_not_retried_as_schema_repair(monkeypatch):
     with pytest.raises(autonomy.ResearchUnavailable) as e:autonomy.questions('fictional',[])
     assert len(calls)==1
     assert e.value.diagnostics['proposal_attempts'][0]['rejected']=='model_transport_unavailable'
+
+
+def test_source_transport_stop_preserves_dossier_and_does_not_research_next_candidate(monkeypatch,tmp_path):
+    import json
+    from curiosity import autonomy,evidence,spec
+    monkeypatch.setattr(spec,'ROOT',tmp_path)
+    candidates=[{'question':'Why does fictional object move?','search_terms':'synthetic'}]*2
+    monkeypatch.setattr(autonomy,'questions',lambda *a,**k:(candidates,{}))
+    calls=[]
+    sources=[{'url':'https://one.edu/article','text':'Synthetic observation. '*60},{'url':'https://two.gov/article','text':'Synthetic mechanism. '*60}]
+    def research(*a):calls.append(1);return sources,{}
+    monkeypatch.setattr(autonomy,'research',research)
+    def fail(*a):raise remote_ai.ModelOutputInvalid({'transport_failure':True,'provider_failures':[{'category':'quota','http_status':429}]})
+    monkeypatch.setattr(evidence,'plan_sources',fail)
+    with pytest.raises(autonomy.ResearchUnavailable):autonomy.select_and_research('fake',[])
+    assert len(calls)==1
+    dossier=json.loads((tmp_path/'drafts/research-1.json').read_text())
+    assert dossier['source_records']==sources and dossier['operator_topic_or_source_input'] is False
+    stop=json.loads((tmp_path/'drafts/provider-stop.json').read_text())
+    assert stop['stopped'] and stop['failure']['provider_failures'][0]['http_status']==429
+
+
+def test_gemini_json_is_explicit_not_automatic_fallback(monkeypatch):
+    monkeypatch.setenv('CURIOSITY_LLM_BACKEND','prepared-router-gemini')
+    calls=[]
+    def request(system,prompt,schema,effort):calls.append(1);return {'ok':True},{'model':'gemini-2.5-flash'}
+    monkeypatch.setattr(router_ai,'gemini_request',request)
+    monkeypatch.setattr(router_ai,'request',lambda *a,**k:pytest.fail('Stopped OpenRouter path must not run'))
+    assert storyboard.ask('ignored','synthetic',{}, {'type':'object'})[0]=={'ok':True}
+    assert len(calls)==1
