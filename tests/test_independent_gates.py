@@ -190,7 +190,7 @@ def test_source_contract_retry_is_bounded_specific_and_still_requires_independen
     calls = []; independent = []
     def ask(model, system, prompt, schema, endpoint, seed, **kwargs):
         calls.append(deepcopy(prompt))
-        assert schema['properties']['answer']['maxLength'] == 500
+        assert 'answer' not in schema['properties'] and schema['properties']['answer_claims']['maxItems']==3
         assert schema['properties']['source_assessments']['items']['properties']['reason']['enum'][0] == 'current_observation_or_mechanism'
         if len(calls) == 1: raise remote_ai.ModelOutputInvalid(failure)
         return deepcopy(verdict), {'synthetic': True}
@@ -262,7 +262,7 @@ def test_negative_empty_answer_is_valid_data_and_does_not_trigger_rewrite_or_sci
     verdict.update(supported=False, answer='', answer_quote_ids=[], answer_claims=[], issues=['answer_not_supported'])
     def ask(model, system, prompt, schema, *args, **kwargs):
         calls.append(1)
-        assert Draft202012Validator(schema).is_valid(verdict)
+        assert Draft202012Validator(schema).is_valid({k:v for k,v in verdict.items() if k not in {'answer','answer_quote_ids'}})
         assert prompt['audit_contract']['negative_answer_may_be_empty'] is True
         return deepcopy(verdict), {'synthetic': True}
     def forbidden(*args): raise AssertionError('Negative verdict reached science inference')
@@ -301,9 +301,9 @@ def test_source_audit_reasons_are_closed_codes_and_positive_answer_gate_is_uncha
     sources, verdict, failure = source_contract_fixture(); calls = []
     def ask(model, system, prompt, schema, *args, **kwargs):
         validator = Draft202012Validator(schema)
-        assert validator.is_valid(verdict)
+        assert validator.is_valid({k:v for k,v in verdict.items() if k not in {'answer','answer_quote_ids'}})
         assert schema['additionalProperties'] is False
-        assert schema['properties']['answer']['maxLength'] == 500
+        assert 'answer' not in schema['properties'] and schema['properties']['answer_claims']['maxItems']==3
         reason = schema['properties']['source_assessments']['items']['properties']['reason']
         assert 'enum' in reason and 'maxLength' not in reason
         bad = deepcopy(verdict); bad['source_assessments'][0]['reason'] = 'unbounded generated audit prose'
