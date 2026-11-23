@@ -162,3 +162,7 @@ Source assessment first emits cited material conditions/alternatives before its 
 ### Retained scope-audit failures
 
 Scope explanations are diagnostics, not video narration: each allows up to1600characters within the existing four-finding and5000output-token caps. No source, evidence or semantic decision requirement changes. Invalid scope output remains failed, is not edited or shortened, and is retained alongside original source passages, selected evidence and prior entailment. Invalid source-assessment originals are retained too. A formatting failure is labelled separately from a scientific rejection and cannot start media or an automatic retry.
+
+### Sentence-level answer evidence and checked critic basis
+
+The source writer maps each original answer sentence to its own source sentence IDs. The ordered sentence texts must reproduce the answer exactly; their citation union must match the declared evidence. Each sentence then passes the unchanged0.90independent entailment threshold against only its own declared evidence, with no truncation. A scope critic must separately state a source-grounded factual basis for each concern; that basis receives the same independent entailment check before any concern can guide fresh generation. An unsupported critic does not authorize acceptance: the candidate remains failed and does not get a blind retry. No prior answer or critic text is inserted into narration.
