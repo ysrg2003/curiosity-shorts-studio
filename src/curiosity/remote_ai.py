@@ -2,10 +2,30 @@
 import json
 from copy import deepcopy
 import os
+import time
 from decimal import Decimal
 from urllib.request import urlopen
 
 MODEL='particle-ai/particle-1:free'
+# Documented free cap is 20 requests per minute: keep at least 3.2 s between inference requests.
+MIN_SPACING_SECONDS=3.2
+RETRY_AFTER_PAUSE_CAP_SECONDS=10
+_pacing={'last':None}
+_sleep=time.sleep
+_clock=time.monotonic
+
+
+def pace_before_request():
+    """Wait out the minimum spacing since the previous inference request started. Never retries anything."""
+    now=_clock();last=_pacing['last']
+    if last is not None and now-last<MIN_SPACING_SECONDS:_sleep(MIN_SPACING_SECONDS-(now-last))
+    _pacing['last']=_clock()
+
+
+def pause_for_retry_after(shape):
+    """Pause (bounded) for a documented Retry-After before the run stops. The caller still raises: this is not a retry."""
+    value=shape.get('retry_after_seconds')
+    if isinstance(value,int) and value>0:_sleep(min(value,RETRY_AFTER_PAUSE_CAP_SECONDS))
 
 
 class ModelOutputInvalid(ValueError):
@@ -112,6 +132,7 @@ def request(prompt,system,schema=None,json_mode=False,effort='none'):
     if schema:profile.update(response_format={'type':'json_schema','json_schema':{'name':'curiosity_response','schema':strict_schema(schema),'strict':True}},response_parser='json_or_text_envelope')
     elif json_mode:profile.update(response_format='json_object',response_parser='json_or_text_envelope')
     else:profile.update(response_format='none',response_parser='text_envelope')
+    pace_before_request()
     try:
         result=AuditedAdapter('openrouter','https://openrouter.ai/api/v1').complete_json(model=MODEL,secret=key,system_prompt=system,user_prompt=prompt,timeout_seconds=180,supports_response_format=bool(schema or json_mode),invocation_profile=profile)
     except UnexpectedModelCost:raise
@@ -130,6 +151,7 @@ def request(prompt,system,schema=None,json_mode=False,effort='none'):
             elif status==429:reason='rate_or_quota_limit'
         except (ValueError,TypeError,AttributeError):pass
         if status==200 and category=='invalid_or_unknown':raise ModelOutputInvalid(shape) from None
+        if status==429:pause_for_retry_after(shape)
         raise ModelRequestFailed({**shape,'http_status':status,'category':category,'reason':reason}) from None
     usage=checked_usage(result.usage);output=result.payload;extracted=False
     if schema or json_mode:
