@@ -2,6 +2,7 @@
 import json
 from copy import deepcopy
 import os
+import sys
 import time
 from decimal import Decimal
 from urllib.request import urlopen
@@ -11,6 +12,17 @@ MODEL='particle-ai/particle-1:free'
 MIN_SPACING_SECONDS=3.2
 RETRY_AFTER_PAUSE_CAP_SECONDS=10
 _pacing={'last':None}
+_log=[]  # redacted per-request trail: number, calling stage (function names only), http status, spacing
+
+
+def calling_stage():
+    """Names of the nearest callers outside this module. Names only, never arguments or content."""
+    names=[];frame=sys._getframe(1)
+    while frame and len(names)<3:
+        if frame.f_globals.get('__name__')!=__name__ and not frame.f_globals.get('__name__','').startswith(('pytest','_pytest','pluggy')):
+            names.append(frame.f_code.co_name)
+        frame=frame.f_back
+    return '<'.join(names) or 'unknown'
 _sleep=time.sleep
 _clock=time.monotonic
 
@@ -107,9 +119,9 @@ def request(prompt,system,schema=None,json_mode=False,effort='none'):
     class AuditedAdapter(OpenAICompatibleAdapter):
         def _body(self,response):
             body=super()._body(response)
-            shape['http_status']=int(response.status_code)
+            shape['http_status']=int(response.status_code);entry['http_status']=shape['http_status']
             if response.status_code==429:
-                for header,name,ceiling in [('Retry-After','retry_after_seconds',604800),('X-RateLimit-Reset','rate_reset_unix_ms',4102444800000)]:
+                for header,name,ceiling in [('Retry-After','retry_after_seconds',604800),('X-RateLimit-Reset','rate_reset_unix_ms',4102444800000),('X-RateLimit-Limit','rate_limit',10**9),('X-RateLimit-Remaining','rate_remaining',10**9)]:
                     value=(getattr(response,'headers',{}) or {}).get(header)
                     try:number=int(value)
                     except (ValueError,TypeError):continue
@@ -133,6 +145,8 @@ def request(prompt,system,schema=None,json_mode=False,effort='none'):
     elif json_mode:profile.update(response_format='json_object',response_parser='json_or_text_envelope')
     else:profile.update(response_format='none',response_parser='text_envelope')
     pace_before_request()
+    entry={'request_number':len(_log)+1,'stage':calling_stage(),'http_status':None}
+    _log.append(entry);shape['request_number']=entry['request_number'];shape['stage']=entry['stage']
     try:
         result=AuditedAdapter('openrouter','https://openrouter.ai/api/v1').complete_json(model=MODEL,secret=key,system_prompt=system,user_prompt=prompt,timeout_seconds=180,supports_response_format=bool(schema or json_mode),invocation_profile=profile)
     except UnexpectedModelCost:raise
@@ -151,6 +165,7 @@ def request(prompt,system,schema=None,json_mode=False,effort='none'):
             elif status==429:reason='rate_or_quota_limit'
         except (ValueError,TypeError,AttributeError):pass
         if status==200 and category=='invalid_or_unknown':raise ModelOutputInvalid(shape) from None
+        shape['requests_so_far']=len(_log);shape['recent_requests']=[dict(item) for item in _log[-5:]]
         if status==429:pause_for_retry_after(shape)
         raise ModelRequestFailed({**shape,'http_status':status,'category':category,'reason':reason}) from None
     usage=checked_usage(result.usage);output=result.payload;extracted=False
