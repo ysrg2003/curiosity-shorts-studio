@@ -329,7 +329,7 @@ def test_structurally_valid_plan_still_fails_exact_question_or_alternative_audit
         return {'source_decisions':[{'source_index':i,'relevant_to_exact_question':True} for i in range(2)],'observation_quote_ids':['S0Q0'],'mechanism_quote_ids':['S1Q0'],'condition_quote_ids':[],'alternative_quote_ids':[],'sufficient_for_exact_question':True},{}
     monkeypatch.setattr(storyboard,'ask',ask)
     accepted,report=evidence.plan_sources('Synthetic?',sources(),'synthetic')
-    assert not accepted and len(calls)==2 and not report['pre_answer_plan_audit']['accepted']
+    assert not accepted and len(calls)==4 and not report['pre_answer_plan_audit']['accepted']
 
 
 def test_same_publisher_records_do_not_replace_independent_evidence_groups(monkeypatch):
