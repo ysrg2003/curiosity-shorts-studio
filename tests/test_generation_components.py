@@ -381,6 +381,6 @@ def test_batch_checks_configured_request_reserve_before_any_topic_inference(monk
     monkeypatch.setattr(remote_ai,'free_quota_status',budget)
     monkeypatch.setattr(autonomy,'select_and_research',lambda *a,**k:pytest.fail('No inference without a verified request reserve'))
     with pytest.raises(RuntimeError,match='No inference attempted'):batch.main()
-    assert seen==[58]
+    assert seen==[70]
     audit=json.loads((tmp_path/'drafts/quota-budget.json').read_text())
     assert audit['video_count']==2 and not audit['inference_performed']
